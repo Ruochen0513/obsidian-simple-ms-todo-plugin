@@ -1,7 +1,7 @@
 {
 	"name": "simple-microsoft-todo",
 	"version": "1.0.0",
-	"description": "Microsoft To Do integration",
+	"description": "Microsoft To Do integration.",
 	"main": "main.js",
 	"scripts": {
 	  "dev": "node esbuild.config.mjs",
