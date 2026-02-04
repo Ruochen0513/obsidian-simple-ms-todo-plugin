@@ -1,0 +1,10 @@
+{
+	"id": "obsidian-microsoft-todo",
+	"name": "Simple Microsoft To Do",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Integrate Microsoft To Do in sidebar",
+	"author": "Ruochen0513",
+	"authorUrl": "https://github.com/Ruochen0513",
+	"isDesktopOnly": false
+}

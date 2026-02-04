@@ -1,0 +1,40 @@
+/* 容器样式 */
+.ms-todo-container {
+    padding: 10px;
+}
+
+/* 单个任务项 */
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.todo-item input[type="checkbox"] {
+    margin-top: 4px;
+    margin-right: 10px;
+    cursor: pointer;
+}
+
+.todo-item span {
+    line-height: 1.4;
+    word-break: break-all;
+}
+
+/* 完成后的样式 */
+.todo-item.completed span {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+/* 底部添加栏 */
+.todo-add-box {
+    margin-top: 15px;
+    display: flex;
+    gap: 5px;
+}
+
+.todo-add-box input {
+    width: 100%;
+}
