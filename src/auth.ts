@@ -7,9 +7,8 @@ export interface TokenResponse {
     scope: string;
 }
 
-// 你的 Azure Client ID
 export const CLIENT_ID = '28d3e5ae-00e3-4ff6-9443-742f353cf511'; 
-// 必须和 Azure 后台配置的完全一致
+
 export const REDIRECT_URI = 'obsidian://mstodo-auth'; 
 export const TENANT = 'common';
 export const SCOPES = ['Tasks.ReadWrite', 'User.Read', 'offline_access'];
