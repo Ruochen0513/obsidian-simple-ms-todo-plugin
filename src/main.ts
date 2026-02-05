@@ -262,7 +262,7 @@ export default class MsTodoPlugin extends Plugin {
 
     refreshView() {
         const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_TODO);
-        void leaves.forEach(leaf => { if (leaf.view instanceof TodoView) leaf.view.render(); });
+        leaves.forEach(leaf => { if (leaf.view instanceof TodoView) void leaf.view.render(); });
     }
 
     async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
@@ -310,7 +310,7 @@ class MsTodoSettingTab extends PluginSettingTab {
                         .setButtonText("Sign in")
                         .setCta() 
                         .onClick(() => {
-                            this.plugin.login();
+                            void this.plugin.login();
                         })
                     );
             }
