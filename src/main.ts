@@ -30,7 +30,7 @@ class MsTodoApi {
         if (this.plugin.settings.tokenExpiresAt - now < 5 * 60 * 1000) {
             if (this.plugin.settings.refreshToken) {
                 try {
-                    console.log("Token即将过期，正在刷新...");
+                    console.warn("Token即将过期，正在刷新...");
                     const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
                     await this.plugin.saveTokens(newTokens);
                     return newTokens.access_token;
@@ -45,7 +45,7 @@ class MsTodoApi {
         return this.plugin.settings.accessToken;
     }
 
-    async request(url: string, method: string = 'GET', body?: any) {
+    async request(url: string, method: string = 'GET', body?: Record<string, unknown>) {
         const token = await this.getValidToken();
         return requestUrl({
             url: url,
@@ -86,22 +86,22 @@ class TodoView extends ItemView {
     }
 
     getViewType() { return VIEW_TYPE_TODO; }
-    getDisplayText() { return "Microsoft To Do"; }
+    getDisplayText() { return "Microsoft to do"; }
     getIcon() { return "check-square"; }
 
     async onOpen() {
-        this.render();
+        await this.render();
     }
 
     async render() {
         const container = this.contentEl;
         container.empty();
         container.addClass("ms-todo-container");
-        container.createEl("h4", { text: "My Tasks" });
+        container.createEl("h4", { text: "My tasks" });
 
         // 如果没有 Token，显示登录按钮
         if (!this.plugin.settings.accessToken) {
-            const loginBtn = container.createEl("button", { text: "Sign in Microsoft To Do" });
+            const loginBtn = container.createEl("button", { text: "Sign in microsoft to do" });
             loginBtn.onclick = () => this.plugin.login();
             return;
         }
@@ -130,31 +130,61 @@ class TodoView extends ItemView {
             refreshBtn.onclick = () => this.render();
             logoutBtn.onclick = async () => {
                 await this.plugin.clearData();
-                this.render();
+                void this.render();
             };
-
-            const tasks = await api.getTasks(defaultListId);
             
+            interface Task {
+                id: string;
+                title: string;
+                length: number;
+            }
+
+            const tasks: Task[] = await api.getTasks(defaultListId);
+
             if (tasks.length === 0) taskContainer.createEl("div", { text: "Nothing to do 🎉" });
 
-            tasks.forEach((task: any) => {
+            tasks.forEach((task: Task) => {
                 const row = taskContainer.createEl("div", { cls: "todo-item" });
                 const checkbox = row.createEl("input", { type: "checkbox" });
-                checkbox.onclick = async () => {
-                    row.addClass("completed");
-                    await api.completeTask(defaultListId, task.id);
-                    setTimeout(() => this.render(), 500);
+                checkbox.onclick = () => {
+                    void (async () => {
+                        try {
+                            row.addClass("completed");
+                            await api.completeTask(defaultListId, task.id);
+                            setTimeout(() => {
+                                void this.render();
+                            }, 500);
+                        } catch (e) {
+                            row.removeClass("completed");
+                            checkbox.checked = false;
+                            new Notice("Failed to complete task");
+                            console.error(e);
+                        }
+                    })();
                 };
+                
                 row.createSpan({ text: task.title });
             });
 
             // 添加输入框
             const input = container.createEl("input", { placeholder: "Add a task...", attr: { style: "width: 100%; margin-top: 10px;" } });
-            input.addEventListener("keypress", async (e) => {
+            input.addEventListener("keypress", (e: KeyboardEvent) => {
+                // 检查按键
                 if (e.key === "Enter" && input.value.trim()) {
-                    await api.createTask(defaultListId, input.value);
-                    new Notice("Added");
-                    this.render();
+                    const title = input.value.trim();
+                    input.value = "";
+            
+                    void (async () => {
+                        try {
+                            await api.createTask(defaultListId, title);
+                            new Notice("Task added");
+                            await this.render();
+                        } catch (e) {
+                            new Notice("Failed to create task");
+                            console.error(e);
+                            input.value = title; 
+                        }
+                    })();
                 }
             });
 
@@ -180,7 +210,7 @@ export default class MsTodoPlugin extends Plugin {
         });
 
         this.registerView(VIEW_TYPE_TODO, (leaf) => new TodoView(leaf, this));
-        this.addRibbonIcon('check-square', 'Microsoft To Do', () => this.activateView());
+        this.addRibbonIcon('check-square', 'Microsoft to do', () => this.activateView());
 
         this.addSettingTab(new MsTodoSettingTab(this.app, this));
     }
@@ -203,7 +233,7 @@ export default class MsTodoPlugin extends Plugin {
 
         if (data.code) {
             try {
-                new Notice("Connecting to Microsoft...");
+                new Notice("Connecting to microsoft...");
                 // 用 Code 换 Token
                 const tokens = await this.auth.exchangeCodeForToken(data.code, this.pkceVerifier);
                 await this.saveTokens(tokens);
@@ -213,7 +243,7 @@ export default class MsTodoPlugin extends Plugin {
                 this.refreshView();
             } catch (e) {
                 console.error(e);
-                new Notice("获取 Token 失败，请看控制台");
+                new Notice("获取 token 失败，请看控制台");
             }
         }
     }
@@ -232,7 +262,7 @@ export default class MsTodoPlugin extends Plugin {
 
     refreshView() {
         const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_TODO);
-        leaves.forEach(leaf => { if (leaf.view instanceof TodoView) leaf.view.render(); });
+        void leaves.forEach(leaf => { if (leaf.view instanceof TodoView) leaf.view.render(); });
     }
 
     async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
@@ -247,7 +277,7 @@ export default class MsTodoPlugin extends Plugin {
             leaf = workspace.getRightLeaf(false);
             if(leaf) await leaf.setViewState({ type: VIEW_TYPE_TODO, active: true });
         }
-        if(leaf) workspace.revealLeaf(leaf);
+        if(leaf) void workspace.revealLeaf(leaf);
     }
 }
 
@@ -257,17 +287,32 @@ class MsTodoSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'Microsoft To Do' });
-        
-        if(this.plugin.settings.accessToken) {
-             containerEl.createEl('p', { text: '✅ Signed in', attr: {style: 'color: green'} });
-             new Setting(containerEl).addButton(btn => btn.setButtonText("Sign out").onClick(() => {
-                 this.plugin.clearData();
-                 this.display();
-             }));
-        } else {
-             containerEl.createEl('p', { text: '❌ Not signed in' });
-             new Setting(containerEl).addButton(btn => btn.setButtonText("Sign in").onClick(() => this.plugin.login()));
-        }
+        new Setting(containerEl)
+            .setName("Microsoft to do")
+            .setHeading(); 
+        if (this.plugin.settings.accessToken) {
+                new Setting(containerEl)
+                    .setName("Account status")
+                    .setDesc("✅ signed in")
+                    .addButton(btn => btn
+                        .setButtonText("Sign out")
+                        .setWarning() 
+                        .onClick(async () => {
+                            await this.plugin.clearData();
+                            this.display();
+                        })
+                    );
+            } else {
+                new Setting(containerEl)
+                    .setName("Account status")
+                    .setDesc("❌ not signed in")
+                    .addButton(btn => btn
+                        .setButtonText("Sign in")
+                        .setCta() 
+                        .onClick(() => {
+                            this.plugin.login();
+                        })
+                    );
+            }
     }
 }
