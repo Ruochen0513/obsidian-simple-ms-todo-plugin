@@ -1,4 +1,50 @@
+[English](#simple-microsoft-to-do-for-obsidian) | [简体中文](#simple-microsoft-to-do-for-obsidian-中文说明)
+
 # Simple Microsoft To Do for Obsidian
+
+An unofficial plugin for [Obsidian](https://obsidian.md) that allows you to integrate and manage your **Microsoft To Do** tasks directly within the Obsidian sidebar.
+
+## ✨ Features
+
+- **Sidebar Integration**: View your to-dos in the Obsidian sidebar without switching windows.
+- **Task Management**:
+    - ✅ **View Tasks**: Automatically loads your default task list.
+    - ➕ **Add Tasks**: Quickly create new tasks via the input box at the bottom.
+    - ☑️ **Complete Tasks**: Click the checkbox to mark tasks as completed (syncs to Microsoft To Do).
+- **Secure Login**: Uses the official Microsoft OAuth2 authorization flow and supports automatic Access Token refreshing, so you don't need to log in frequently.
+
+## 🛠️ Installation
+
+### Manual Installation (From Release)
+
+1. Download the latest `main.js`, `manifest.json`, and `styles.css` files from the GitHub Releases page.
+2. Go to your Obsidian vault directory: `.obsidian/plugins/obsidian-microsoft-todo/` (create the folder if it doesn't exist).
+3. Place the downloaded files into this folder.
+4. Restart Obsidian and enable "Simple Microsoft To Do" in **Settings** -> **Community Plugins**.
+
+## 📖 Usage Guide
+
+1. After **enabling the plugin**, a ☑️ icon will appear in the Obsidian Ribbon (left sidebar).
+2. Click the icon to open the **Microsoft To Do** view in the right sidebar.
+3. For the first use, you will see a **"Sign in Microsoft To Do"** button.
+4. Click to sign in. A browser window will open for Microsoft authorization. Please sign in and authorize.
+5. After successful authorization, the browser will attempt to redirect back to Obsidian. The plugin will automatically fetch the Token and load your task list.
+
+### Common Operations
+
+- **Refresh List**: Click the "Refresh" button.
+- **Add Task**: Type in the input box at the bottom of the view and press `Enter`.
+- **Sign Out**: Click "Sign out" at the top of the view, or sign out via the plugin settings page.
+
+## 📄 License
+
+[MIT License](LICENSE)
+
+---
+
+<div id="simple-microsoft-to-do-for-obsidian-中文说明"></div>
+
+# Simple Microsoft To Do for Obsidian (中文说明)
 
 这是一个为 [Obsidian](https://obsidian.md) 开发的非官方插件，允许您直接在 Obsidian 的侧边栏中集成和管理您的 **Microsoft To Do** 任务。
 
@@ -20,7 +66,6 @@
 3. 将下载的文件放入该文件夹中。
 4. 重启 Obsidian，在 **设置** -> **第三方插件** 中启用 "Simple Microsoft To Do"。
 
-
 ## 📖 使用指南
 
 1. **启用插件**后，Obsidian 界面左侧 Ribbon 栏（侧边条）会出现一个 ☑️  图标。
@@ -34,8 +79,6 @@
 - **刷新列表**：点击 "Refresh" 按钮。
 - **添加任务**：在视图底部的输入框输入内容，按下 `Enter` 键即可。
 - **注销账号**：在视图顶部点击 "Sign out"，或在插件设置页点击注销。
-
-
 
 ## 📄 许可证
 
