@@ -43,7 +43,7 @@ export class QuickCaptureModal extends Modal {
 
         const listField = row.createDiv({ cls: 'todo-quick-capture-field' });
         listField.createDiv({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureTargetList') });
-        this.listSelect = listField.createEl('select', { cls: 'todo-quick-capture-select' });
+        this.listSelect = listField.createEl('select', { cls: 'dropdown todo-quick-capture-select' });
         this.lists.forEach((list) => {
             const option = this.listSelect.createEl('option');
             option.value = list.id;
