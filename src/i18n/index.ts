@@ -39,7 +39,10 @@ let cached: Messages | null = null;
 let localePreference: LocalePreference = 'auto';
 
 function detectLocale(): LocaleCode {
-    const lang = getLanguage().toLowerCase().replace('_', '-');
+    // getLanguage() is only available on Obsidian ≥ 1.8.7; guard so older
+    // versions fall back to English instead of crashing.
+    const language = typeof getLanguage === 'function' ? getLanguage() : 'en';
+    const lang = language.toLowerCase().replace('_', '-');
     // Simplified Chinese → zh-cn; everything else (incl. zh-tw) → en.
     return lang === 'zh-cn' || lang === 'zh' ? 'zh-cn' : 'en';
 }
