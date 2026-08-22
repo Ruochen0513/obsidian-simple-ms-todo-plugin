@@ -47,6 +47,11 @@ export const en = {
         manualSync: 'Manual markdown sync',
         manualSyncDesc: 'Fetch all Microsoft To Do lists and write them into the markdown file now.',
         syncNow: 'Sync now',
+        language: 'Language',
+        languageDesc: 'Choose the plugin UI language. Defaults to following Obsidian.',
+        languageAuto: 'Follow Obsidian',
+        languageEn: 'English',
+        languageZhCn: '简体中文',
     },
 
     notices: {

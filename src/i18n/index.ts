@@ -15,6 +15,7 @@ import { zhCn } from './locales/zh-cn';
 
 export type { TranslationKey };
 export type LocaleCode = 'en' | 'zh-cn';
+export type LocalePreference = 'auto' | LocaleCode;
 export type Messages = Record<TranslationKey, string>;
 
 type Vars = Record<string, string | number | undefined>;
@@ -35,7 +36,7 @@ const dictionaries: Record<LocaleCode, Messages> = {
 };
 
 let cached: Messages | null = null;
-let localeOverride: LocaleCode | null = null;
+let localePreference: LocalePreference = 'auto';
 
 function detectLocale(): LocaleCode {
     const lang = getLanguage().toLowerCase().replace('_', '-');
@@ -43,8 +44,12 @@ function detectLocale(): LocaleCode {
     return lang === 'zh-cn' || lang === 'zh' ? 'zh-cn' : 'en';
 }
 
+function effectiveLocale(): LocaleCode {
+    return localePreference === 'auto' ? detectLocale() : localePreference;
+}
+
 function messages(): Messages {
-    if (!cached) cached = { ...dictionaries.en, ...dictionaries[localeOverride ?? detectLocale()] };
+    if (!cached) cached = { ...dictionaries.en, ...dictionaries[effectiveLocale()] };
     return cached;
 }
 
@@ -57,12 +62,15 @@ export function t(key: TranslationKey, vars?: Vars): string {
         vars[name] !== undefined ? String(vars[name]) : match);
 }
 
-/** Override the active locale (e.g. a future user setting). Clears the cache. */
-export function setLocale(locale: LocaleCode): void {
-    localeOverride = locale;
+/**
+ * Set the locale preference. 'auto' follows Obsidian's UI language;
+ * a concrete code forces that locale. Clears the cache.
+ */
+export function setLocale(locale: LocalePreference): void {
+    localePreference = locale;
     cached = null;
 }
 
 export function getLocale(): LocaleCode {
-    return localeOverride ?? detectLocale();
+    return effectiveLocale();
 }

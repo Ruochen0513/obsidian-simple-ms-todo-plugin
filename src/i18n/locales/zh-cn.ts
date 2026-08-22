@@ -36,6 +36,11 @@ export const zhCn: Record<TranslationKey, string> = {
     'settings.manualSync': '手动同步 Markdown',
     'settings.manualSyncDesc': '立即获取全部 Microsoft To Do 清单并写入 Markdown 同步文件。',
     'settings.syncNow': '立即同步',
+    'settings.language': '界面语言',
+    'settings.languageDesc': '选择插件界面语言。默认跟随 Obsidian 设置。',
+    'settings.languageAuto': '跟随 Obsidian 语言',
+    'settings.languageEn': 'English',
+    'settings.languageZhCn': '简体中文',
 
     'notices.loadingMsTodo': '正在加载 Microsoft To Do…',
     'notices.loadFailed': '加载失败',

@@ -4,7 +4,7 @@ import { MsTodoApi, TodoList } from './api/ms-todo-api';
 import { TodoView, VIEW_TYPE_TODO, TaskCacheSnapshot } from './ui/todo-view';
 import { QuickCaptureModal } from './ui/quick-capture-modal';
 import { DEFAULT_SETTINGS, MsTodoSettings } from './settings';
-import { t } from './i18n';
+import { setLocale, t, type LocalePreference } from './i18n';
 
 export default class MsTodoPlugin extends Plugin {
     settings: MsTodoSettings;
@@ -14,6 +14,7 @@ export default class MsTodoPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
+        setLocale(this.settings.locale);
         this.auth = new AuthManager();
 
         this.registerObsidianProtocolHandler('mstodo-auth', async (data: ObsidianProtocolData) => {
@@ -22,6 +23,23 @@ export default class MsTodoPlugin extends Plugin {
 
         this.registerView(VIEW_TYPE_TODO, (leaf) => new TodoView(leaf, this));
         this.addRibbonIcon('check-square', 'Microsoft To Do', () => this.activateView());
+        this.registerCommands();
+
+        this.addSettingTab(new MsTodoSettingTab(this.app, this));
+
+        if (this.settings.syncOnStartup && this.settings.markdownSyncEnabled && this.settings.accessToken) {
+            window.setTimeout(() => {
+                void this.syncTasksToMarkdown({ silent: true });
+            }, 2000);
+        }
+    }
+
+    registerCommands() {
+        // Obsidian's App.commands registry is not in the public type surface;
+        // it does exist at runtime and is the documented way to drop commands.
+        const commands = (this.app as unknown as { commands: { removeCommand(id: string): void } }).commands;
+        const ids = ['open-view', 'quick-capture', 'sync-to-markdown'] as const;
+        ids.forEach((id) => commands.removeCommand(`${this.manifest.id}:${id}`));
 
         this.addCommand({
             id: 'open-view',
@@ -40,14 +58,15 @@ export default class MsTodoPlugin extends Plugin {
             name: t('commands.syncToMarkdown'),
             callback: () => this.syncTasksToMarkdown(),
         });
+    }
 
-        this.addSettingTab(new MsTodoSettingTab(this.app, this));
-
-        if (this.settings.syncOnStartup && this.settings.markdownSyncEnabled && this.settings.accessToken) {
-            window.setTimeout(() => {
-                void this.syncTasksToMarkdown({ silent: true });
-            }, 2000);
-        }
+    async setPluginLocale(locale: LocalePreference) {
+        if (this.settings.locale === locale) return;
+        this.settings.locale = locale;
+        await this.saveSettings();
+        setLocale(locale);
+        this.registerCommands();
+        this.refreshView();
     }
 
     async login() {
@@ -277,6 +296,19 @@ class MsTodoSettingTab extends PluginSettingTab {
                     })
                 );
         }
+
+        new Setting(containerEl)
+            .setName(t('settings.language'))
+            .setDesc(t('settings.languageDesc'))
+            .addDropdown(dropdown => dropdown
+                .addOption('auto', t('settings.languageAuto'))
+                .addOption('en', t('settings.languageEn'))
+                .addOption('zh-cn', t('settings.languageZhCn'))
+                .setValue(this.plugin.settings.locale)
+                .onChange(async (value) => {
+                    await this.plugin.setPluginLocale(value as LocalePreference);
+                    this.display();
+                }));
 
         new Setting(containerEl)
             .setName(t('settings.markdownSync'))

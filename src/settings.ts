@@ -1,3 +1,5 @@
+import type { LocalePreference } from './i18n';
+
 export interface MsTodoSettings {
     accessToken: string;
     refreshToken: string;
@@ -6,6 +8,7 @@ export interface MsTodoSettings {
     markdownSyncPath: string;
     syncAfterLogin: boolean;
     syncOnStartup: boolean;
+    locale: LocalePreference;
 }
 
 export const DEFAULT_SETTINGS: MsTodoSettings = {
@@ -16,4 +19,5 @@ export const DEFAULT_SETTINGS: MsTodoSettings = {
     markdownSyncPath: 'Microsoft To Do.md',
     syncAfterLogin: true,
     syncOnStartup: false,
+    locale: 'auto',
 };
