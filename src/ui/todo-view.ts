@@ -1,6 +1,7 @@
 import { App, ItemView, Menu, Modal, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { MsTodoApi, ChecklistItem, TodoList, TodoTask } from '../api/ms-todo-api';
+import { t } from '../i18n';
 
 export const VIEW_TYPE_TODO = 'ms-todo-view';
 const MY_DAY_VIEW_ID = '__my-day__';
@@ -105,7 +106,7 @@ export class TodoView extends ItemView {
 
         const loading = container.createDiv({ cls: 'todo-loading' });
         loading.createDiv({ cls: 'todo-loading-spinner' });
-        loading.createSpan({ text: '正在加载 Microsoft To Do…' });
+        loading.createSpan({ text: t('notices.loadingMsTodo') });
 
         try {
             const api = new MsTodoApi(this.plugin);
@@ -125,7 +126,7 @@ export class TodoView extends ItemView {
         } catch (error) {
             loading.empty();
             loading.addClass('todo-error');
-            loading.createSpan({ text: '加载失败' });
+            loading.createSpan({ text: t('notices.loadFailed') });
             container.createEl('div', { text: String(error), cls: 'todo-error-detail' });
             console.error(error);
         }
@@ -136,8 +137,8 @@ export class TodoView extends ItemView {
         const icon = hero.createDiv({ cls: 'todo-signed-out-icon' });
         setIcon(icon, 'check-check');
         hero.createEl('h3', { text: 'Microsoft To Do' });
-        hero.createEl('p', { text: '登录后可直接在 Obsidian 中查看和管理 Microsoft To Do。' });
-        const loginBtn = hero.createEl('button', { text: '登录 Microsoft To Do', cls: 'todo-primary-button' });
+        hero.createEl('p', { text: t('signedOut.subtitle') });
+        const loginBtn = hero.createEl('button', { text: t('signedOut.signInButton'), cls: 'todo-primary-button' });
         loginBtn.onclick = () => this.plugin.login();
     }
 
@@ -145,9 +146,9 @@ export class TodoView extends ItemView {
         const hero = container.createDiv({ cls: 'todo-signed-out' });
         const icon = hero.createDiv({ cls: 'todo-signed-out-icon' });
         setIcon(icon, 'list-plus');
-        hero.createEl('h3', { text: '创建第一个清单' });
-        hero.createEl('p', { text: 'Microsoft To Do 中还没有可用清单。' });
-        const createBtn = hero.createEl('button', { text: '新建清单', cls: 'todo-primary-button' });
+        hero.createEl('h3', { text: t('empty.noListsTitle') });
+        hero.createEl('p', { text: t('empty.noListsSubtitle') });
+        const createBtn = hero.createEl('button', { text: t('sidebar.newList'), cls: 'todo-primary-button' });
         createBtn.onclick = () => { void this.promptCreateList(api); };
     }
 
@@ -173,9 +174,9 @@ export class TodoView extends ItemView {
 
         const selectedList = this.getSelectedList(lists);
         const actions = header.createDiv({ cls: 'todo-header-actions' });
-        this.createIconButton(actions, 'rotate-cw', '刷新', () => { void this.render(); });
-        this.createIconButton(actions, 'search', '搜索任务', () => { this.searchToggleFn?.(); });
-        this.createIconButton(actions, 'more-vertical', '更多', (event) => {
+        this.createIconButton(actions, 'rotate-cw', t('common.refresh'), () => { void this.render(); });
+        this.createIconButton(actions, 'search', t('sidebar.searchTasks'), () => { this.searchToggleFn?.(); });
+        this.createIconButton(actions, 'more-vertical', t('common.more'), (event) => {
             this.showMoreMenu(event, api, this.getSelectedList(this.currentLists));
         });
 
@@ -215,22 +216,22 @@ export class TodoView extends ItemView {
             if (isSmartViewId(this.selectedListId)) {
                 const isOverdue = this.selectedListId === OVERDUE_VIEW_ID;
                 setIcon(selectorIcon, isOverdue ? 'calendar-clock' : 'sun');
-                label.setText(isOverdue ? '逾期' : '我的一天');
-                selector.setAttr('aria-label', `当前视图：${isOverdue ? '逾期' : '我的一天'}`);
+                label.setText(isOverdue ? t('smartView.overdue') : t('smartView.myDay'));
+                selector.setAttr('aria-label', t('sidebar.currentViewAria', { viewName: isOverdue ? t('smartView.overdue') : t('smartView.myDay') }));
                 return;
             }
 
             const list = this.getSelectedList(lists);
             setIcon(selectorIcon, 'list');
-            label.setText(list?.displayName || '任务');
-            selector.setAttr('aria-label', `当前清单：${list?.displayName || '任务'}`);
+            label.setText(list?.displayName || t('common.tasks'));
+            selector.setAttr('aria-label', t('sidebar.currentListAria', { listName: list?.displayName || t('common.tasks') }));
         };
 
         updateSelector();
 
         const panel = wrapper.createDiv({ cls: 'todo-list-menu' });
         panel.setAttr('role', 'menu');
-        panel.setAttr('aria-label', '切换视图或清单');
+        panel.setAttr('aria-label', t('sidebar.switchViewAria'));
 
         const closeMenu = () => {
             wrapper.removeClass('is-open');
@@ -267,10 +268,10 @@ export class TodoView extends ItemView {
         const renderMenuItems = () => {
             panel.empty();
 
-            panel.createDiv({ text: '智能视图', cls: 'todo-list-menu-section-label' });
+            panel.createDiv({ text: t('sidebar.smartViews'), cls: 'todo-list-menu-section-label' });
             const smartViews: Array<{ id: string; label: string; icon: string }> = [
-                { id: MY_DAY_VIEW_ID, label: '我的一天', icon: 'sun' },
-                { id: OVERDUE_VIEW_ID, label: '逾期', icon: 'calendar-clock' },
+                { id: MY_DAY_VIEW_ID, label: t('smartView.myDay'), icon: 'sun' },
+                { id: OVERDUE_VIEW_ID, label: t('smartView.overdue'), icon: 'calendar-clock' },
             ];
             smartViews.forEach((view) => {
                 const item = panel.createEl('button', { cls: 'todo-list-menu-item todo-smart-view-item' });
@@ -283,14 +284,14 @@ export class TodoView extends ItemView {
                 if (view.id === OVERDUE_VIEW_ID) {
                     const overdueCount = this.getOverdueCount();
                     if (overdueCount !== null && overdueCount > 0) {
-                        item.createSpan({ text: String(overdueCount), cls: 'todo-list-menu-item-count', attr: { 'aria-label': '条逾期任务' } });
+                        item.createSpan({ text: String(overdueCount), cls: 'todo-list-menu-item-count', attr: { 'aria-label': t('smartView.overdueCountAria') } });
                     }
                 }
                 item.onclick = () => switchToSmartView(view.id);
             });
 
             panel.createDiv({ cls: 'todo-list-menu-separator' });
-            panel.createDiv({ text: '清单', cls: 'todo-list-menu-section-label' });
+            panel.createDiv({ text: t('sidebar.lists'), cls: 'todo-list-menu-section-label' });
 
             lists.forEach((list) => {
                 const item = panel.createEl('button', { cls: 'todo-list-menu-item' });
@@ -311,7 +312,7 @@ export class TodoView extends ItemView {
             createItem.setAttr('role', 'menuitem');
             const plusIcon = createItem.createSpan({ cls: 'todo-list-menu-item-icon' });
             setIcon(plusIcon, 'plus');
-            createItem.createSpan({ text: '新建清单', cls: 'todo-list-menu-item-label' });
+            createItem.createSpan({ text: t('sidebar.newList'), cls: 'todo-list-menu-item-label' });
             createItem.onclick = () => {
                 closeMenu();
                 void this.promptCreateList(api);
@@ -356,13 +357,13 @@ export class TodoView extends ItemView {
         setIcon(icon, 'search');
         const input = bar.createEl('input', { cls: 'todo-search-input' });
         input.setAttr('type', 'text');
-        input.setAttr('placeholder', '搜索全部任务…');
-        input.setAttr('aria-label', '搜索全部任务');
+        input.setAttr('placeholder', t('search.placeholder'));
+        input.setAttr('aria-label', t('search.ariaLabel'));
         this.searchInputEl = input;
 
         const clearBtn = bar.createEl('button', { cls: 'todo-search-clear' });
         clearBtn.setAttr('type', 'button');
-        clearBtn.setAttr('aria-label', '清空搜索内容');
+        clearBtn.setAttr('aria-label', t('search.clearAria'));
         const clearIcon = clearBtn.createSpan();
         setIcon(clearIcon, 'x');
 
@@ -495,14 +496,14 @@ export class TodoView extends ItemView {
             main.removeClass('is-list-loading');
             main.empty();
             const state = main.createDiv({ cls: 'todo-inline-error' });
-            state.createSpan({ text: '加载视图失败' });
+            state.createSpan({ text: t('notices.loadViewFailed') });
             console.error(error);
         }
     }
 
     renderTaskSkeleton(main: HTMLElement) {
         main.empty();
-        const skeleton = main.createDiv({ cls: 'todo-list-skeleton', attr: { 'aria-label': '正在加载清单' } });
+        const skeleton = main.createDiv({ cls: 'todo-list-skeleton', attr: { 'aria-label': t('sidebar.loadingListAria') } });
 
         for (let index = 0; index < 5; index++) {
             const row = skeleton.createDiv({ cls: 'todo-skeleton-row' });
@@ -519,7 +520,7 @@ export class TodoView extends ItemView {
         if (this.plugin.settings.markdownSyncEnabled) {
             menu.addItem((item) => {
                 item
-                    .setTitle('同步到笔记')
+                    .setTitle(t('sidebar.syncToNote'))
                     .setIcon('file-down')
                     .onClick(() => { void this.plugin.syncTasksToMarkdown(); });
             });
@@ -528,7 +529,7 @@ export class TodoView extends ItemView {
         if (selectedList && selectedList.wellknownListName !== 'defaultList') {
             menu.addItem((item) => {
                 item
-                    .setTitle('删除当前清单')
+                    .setTitle(t('sidebar.deleteCurrentList'))
                     .setIcon('trash-2')
                     .onClick(() => { void this.deleteList(api, selectedList); });
             });
@@ -537,7 +538,7 @@ export class TodoView extends ItemView {
         menu.addSeparator();
         menu.addItem((item) => {
             item
-                .setTitle('退出登录')
+                .setTitle(t('common.signOut'))
                 .setIcon('log-out')
                 .onClick(async () => {
                     await this.plugin.clearData();
@@ -585,10 +586,10 @@ export class TodoView extends ItemView {
             this.selectedListId = list.id;
             this.selectedTaskId = null;
             this.showCompleted = false;
-            new Notice('清单已创建');
+            new Notice(t('notices.listCreated'));
             await this.render();
         } catch (error) {
-            new Notice('创建清单失败');
+            new Notice(t('notices.createListFailed'));
             console.error(error);
         }
     }
@@ -596,10 +597,10 @@ export class TodoView extends ItemView {
     async deleteList(api: MsTodoApi, list: TodoList) {
         const confirmed = await new Promise<boolean>((resolve) => {
             new DeleteConfirmModal(this.app, {
-                title: '删除清单？',
-                before: '将删除清单“',
+                title: t('modal.deleteListTitle'),
+                before: t('modal.deleteListBefore'),
                 bold: list.displayName,
-                after: '”及其中所有任务，删除后无法恢复。',
+                after: t('modal.deleteListAfter'),
             }, resolve).open();
         });
         if (!confirmed) return;
@@ -613,10 +614,10 @@ export class TodoView extends ItemView {
                 this.selectedTaskId = null;
             }
             this.showCompleted = false;
-            new Notice('清单已删除');
+            new Notice(t('notices.listDeleted'));
             await this.render();
         } catch (error) {
-            new Notice('删除清单失败');
+            new Notice(t('notices.deleteListFailed'));
             console.error(error);
         }
     }
@@ -984,9 +985,9 @@ export class TodoView extends ItemView {
             setIcon(plus, 'plus');
             const input = composer.createEl('input', {
                 cls: 'todo-add-input',
-                placeholder: '添加今天的任务',
+                placeholder: t('taskDetail.addTodayPlaceholder'),
             });
-            input.setAttr('aria-label', `添加今天的任务到 ${defaultList.displayName}`);
+            input.setAttr('aria-label', t('taskDetail.addTodayAria', { listName: defaultList.displayName }));
 
             const createTask = () => {
                 const taskTitle = input.value.trim();
@@ -1012,9 +1013,9 @@ export class TodoView extends ItemView {
                         this.removeOptimisticTask(optimisticTask.id, defaultList.id);
                         if (created) {
                             this.upsertTaskInCache(defaultList.id, created);
-                            new Notice('任务已创建，但设置为今天失败，可在“任务”清单中找到');
+                            new Notice(t('notices.taskCreatedDueTodayFailed'));
                         } else {
-                            new Notice('添加今天的任务失败');
+                            new Notice(t('notices.addTodayTaskFailed'));
                             if (!input.value) input.value = taskTitle;
                         }
                         this.renderTaskList(api, defaultList, listArea, detail);
@@ -1122,9 +1123,9 @@ export class TodoView extends ItemView {
         setIcon(plus, 'plus');
         const input = composer.createEl('input', {
             cls: 'todo-add-input',
-            placeholder: '添加任务',
+            placeholder: t('taskDetail.addTaskPlaceholder'),
         });
-        input.setAttr('aria-label', `添加任务到 ${list.displayName}`);
+        input.setAttr('aria-label', t('taskDetail.addTaskAria', { listName: list.displayName }));
 
         const createTask = () => {
             const taskTitle = input.value.trim();
@@ -1148,7 +1149,7 @@ export class TodoView extends ItemView {
                     this.removeOptimisticTask(optimisticTask.id, list.id);
                     if (!input.value) input.value = taskTitle;
                     this.renderTaskList(api, list, listArea, detail);
-                    new Notice('添加任务失败，已恢复输入内容');
+                    new Notice(t('notices.addTaskFailedRestored'));
                     console.error(error);
                 }
             })();
@@ -1215,7 +1216,7 @@ export class TodoView extends ItemView {
             this.selectedTaskId = originalSelectedTaskId;
             this.replaceTask(originalTask, list.id);
             this.renderTaskList(api, list, listArea, detail);
-            new Notice('更新任务失败，已恢复原状态');
+            new Notice(t('notices.updateTaskFailedReverted'));
             console.error(error);
         }
     }
@@ -1246,7 +1247,7 @@ export class TodoView extends ItemView {
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
             if (this.showCompleted) {
-                new Notice('加载已完成任务失败');
+                new Notice(t('notices.loadCompletedFailed'));
                 this.renderTaskList(api, list, listArea, detail);
             }
             console.error(error);
@@ -1265,17 +1266,17 @@ export class TodoView extends ItemView {
             let emptyTitle: string;
             let emptySubtitle: string;
             if (this.isSearchMode()) {
-                emptyTitle = '没有找到匹配的任务';
-                emptySubtitle = '换个关键词试试。';
+                emptyTitle = t('search.emptyTitle');
+                emptySubtitle = t('search.emptySubtitle');
             } else if (this.selectedListId === MY_DAY_VIEW_ID) {
-                emptyTitle = '今天没有到期任务';
-                emptySubtitle = '你也可以从下方添加一个今天要完成的任务。';
+                emptyTitle = t('empty.myDayTitle');
+                emptySubtitle = t('empty.myDaySubtitle');
             } else if (this.selectedListId === OVERDUE_VIEW_ID) {
-                emptyTitle = '没有逾期任务';
-                emptySubtitle = '所有任务都在正轨上，继续保持。';
+                emptyTitle = t('empty.overdueTitle');
+                emptySubtitle = t('empty.overdueSubtitle');
             } else {
-                emptyTitle = '这里暂时没有任务';
-                emptySubtitle = '从下方添加一项新的待办。';
+                emptyTitle = t('empty.defaultTitle');
+                emptySubtitle = t('empty.defaultSubtitle');
             }
             const empty = listArea.createDiv({ cls: 'todo-empty' });
             const emptyIcon = empty.createSpan({ cls: 'todo-empty-icon' });
@@ -1294,7 +1295,7 @@ export class TodoView extends ItemView {
         completedHeader.setAttr('type', 'button');
         const completedChevron = completedHeader.createSpan({ cls: 'todo-completed-chevron' });
         setIcon(completedChevron, this.showCompleted ? 'chevron-down' : 'chevron-right');
-        completedHeader.createSpan({ text: '已完成', cls: 'todo-completed-title' });
+        completedHeader.createSpan({ text: t('taskRow.completedHeading'), cls: 'todo-completed-title' });
         if (this.showCompleted && completedReady) {
             completedHeader.createSpan({ text: String(completedTasks.length), cls: 'todo-completed-count' });
         }
@@ -1318,9 +1319,9 @@ export class TodoView extends ItemView {
                 const loading = listArea.createDiv({ cls: 'todo-completed-loading' });
                 const spinner = loading.createSpan({ cls: 'todo-inline-spinner' });
                 setIcon(spinner, 'loader-circle');
-                loading.createSpan({ text: '正在后台加载已完成任务…' });
+                loading.createSpan({ text: t('taskRow.completedLoading') });
             } else if (completedTasks.length === 0) {
-                listArea.createEl('div', { text: '暂无已完成任务', cls: 'todo-completed-empty' });
+                listArea.createEl('div', { text: t('taskRow.completedEmpty'), cls: 'todo-completed-empty' });
             }
         }
 
@@ -1352,7 +1353,7 @@ export class TodoView extends ItemView {
         const checkboxWrap = row.createSpan({ cls: 'todo-checkbox-wrap' });
         const checkbox = checkboxWrap.createEl('input', { type: 'checkbox', cls: 'todo-task-checkbox' });
         checkbox.checked = task.status === 'completed';
-        checkbox.setAttr('aria-label', task.status === 'completed' ? '重新打开任务' : '完成任务');
+        checkbox.setAttr('aria-label', task.status === 'completed' ? t('taskRow.reopenAria') : t('taskRow.completeAria'));
         checkbox.onclick = (event) => {
             event.stopPropagation();
             void this.toggleTaskCompletionOptimistically(api, list, listArea, detail, task);
@@ -1386,7 +1387,7 @@ export class TodoView extends ItemView {
 
         const trailing = row.createSpan({ cls: 'todo-task-trailing' });
         if (this.pendingTaskIds.has(task.id)) {
-            const syncing = trailing.createSpan({ cls: 'todo-task-sync-spinner', attr: { 'aria-label': '正在同步' } });
+            const syncing = trailing.createSpan({ cls: 'todo-task-sync-spinner', attr: { 'aria-label': t('taskRow.syncingAria') } });
             setIcon(syncing, 'loader-circle');
         }
         if (task.importance === 'high') {
@@ -1419,9 +1420,9 @@ export class TodoView extends ItemView {
         const topbar = detail.createDiv({ cls: 'todo-detail-topbar' });
         const closeBtn = topbar.createEl('button', { cls: 'todo-icon-button todo-detail-close' });
         closeBtn.setAttr('type', 'button');
-        closeBtn.setAttr('aria-label', '返回任务列表');
+        closeBtn.setAttr('aria-label', t('taskDetail.backAria'));
         setIcon(closeBtn, 'arrow-left');
-        topbar.createSpan({ text: '任务详情', cls: 'todo-detail-topbar-title' });
+        topbar.createSpan({ text: t('taskDetail.title'), cls: 'todo-detail-topbar-title' });
         const topbarSpacer = topbar.createSpan({ cls: 'todo-detail-topbar-spacer' });
         topbarSpacer.setAttr('aria-hidden', 'true');
 
@@ -1452,13 +1453,13 @@ export class TodoView extends ItemView {
                 detail,
                 task,
                 () => api.updateTask(list.id, task.id, { title: nextTitle }),
-                '标题已更新',
+                t('taskDetail.titleUpdated'),
             );
         };
 
         const starBtn = header.createEl('button', { cls: 'todo-star-button' });
         starBtn.setAttr('type', 'button');
-        starBtn.setAttr('aria-label', task.importance === 'high' ? '取消重要' : '标记为重要');
+        starBtn.setAttr('aria-label', task.importance === 'high' ? t('taskDetail.removeImportantAria') : t('taskDetail.markImportantAria'));
         setIcon(starBtn, 'star');
         if (task.importance === 'high') starBtn.addClass('is-important');
         starBtn.onclick = () => {
@@ -1469,7 +1470,7 @@ export class TodoView extends ItemView {
                 detail,
                 task,
                 () => api.toggleImportant(list.id, task),
-                task.importance === 'high' ? '已取消重要' : '已标记为重要',
+                task.importance === 'high' ? t('taskDetail.removedFromImportant') : t('taskDetail.markedAsImportant'),
             );
         };
 
@@ -1477,7 +1478,7 @@ export class TodoView extends ItemView {
         const stepsLabel = stepsCard.createDiv({ cls: 'todo-detail-card-label' });
         const stepsLabelIcon = stepsLabel.createSpan();
         setIcon(stepsLabelIcon, 'list-checks');
-        stepsLabel.createSpan({ text: '步骤' });
+        stepsLabel.createSpan({ text: t('taskDetail.stepsLabel') });
         const checklistItems = task.checklistItems || [];
         if (checklistItems.length > 0) {
             const doneCount = checklistItems.filter((item) => item.isChecked).length;
@@ -1525,12 +1526,12 @@ export class TodoView extends ItemView {
             const stepRow = stepsCard.createDiv({ cls: 'todo-step-row' });
             const checked = stepRow.createEl('input', { type: 'checkbox' });
             checked.checked = step.isChecked;
-            checked.setAttr('aria-label', step.isChecked ? `重新打开步骤：${step.displayName}` : `完成步骤：${step.displayName}`);
+            checked.setAttr('aria-label', step.isChecked ? t('taskDetail.reopenStepAria', { stepName: step.displayName }) : t('taskDetail.completeStepAria', { stepName: step.displayName }));
             const stepLabel = stepRow.createSpan({ text: step.displayName, cls: 'todo-step-label' });
             if (step.isChecked) stepLabel.addClass('is-checked');
             const removeBtn = stepRow.createEl('button', { cls: 'todo-step-remove' });
             removeBtn.setAttr('type', 'button');
-            removeBtn.setAttr('aria-label', `删除步骤：${step.displayName}`);
+            removeBtn.setAttr('aria-label', t('taskDetail.deleteStepAria', { stepName: step.displayName }));
             const removeIcon = removeBtn.createSpan();
             setIcon(removeIcon, 'x');
 
@@ -1544,7 +1545,7 @@ export class TodoView extends ItemView {
                             item.id === step.id ? { ...item, isChecked: nextChecked } : item);
                     },
                     () => { task.checklistItems = previousItems; },
-                    '更新步骤失败',
+                    t('taskDetail.updateStepFailed'),
                 );
             };
 
@@ -1556,7 +1557,7 @@ export class TodoView extends ItemView {
                         task.checklistItems = previousItems.filter((item) => item.id !== step.id);
                     },
                     () => { task.checklistItems = previousItems; },
-                    '删除步骤失败',
+                    t('taskDetail.deleteStepFailed'),
                 );
             };
         });
@@ -1566,9 +1567,9 @@ export class TodoView extends ItemView {
         setIcon(stepAddIcon, 'plus');
         const stepInput = stepComposer.createEl('input', { cls: 'todo-step-add-input' });
         stepInput.setAttr('type', 'text');
-        stepInput.setAttr('placeholder', '添加步骤');
+        stepInput.setAttr('placeholder', t('taskDetail.addStepPlaceholder'));
         stepInput.setAttr('maxlength', '255');
-        stepInput.setAttr('aria-label', '添加步骤');
+        stepInput.setAttr('aria-label', t('taskDetail.addStepPlaceholder'));
 
         const addStep = () => {
             const name = stepInput.value.trim();
@@ -1587,7 +1588,7 @@ export class TodoView extends ItemView {
                     task.checklistItems = [...previousItems, { id: tempId, displayName: name, isChecked: false }];
                 },
                 () => { task.checklistItems = previousItems; },
-                '添加步骤失败',
+                t('taskDetail.addStepFailed'),
                 () => {
                     if (createdItem) {
                         task.checklistItems = (task.checklistItems || []).map((item) =>
@@ -1609,7 +1610,7 @@ export class TodoView extends ItemView {
         const dateLabel = dateCard.createDiv({ cls: 'todo-detail-card-label' });
         const dateLabelIcon = dateLabel.createSpan();
         setIcon(dateLabelIcon, 'calendar-days');
-        dateLabel.createSpan({ text: '截止日期' });
+        dateLabel.createSpan({ text: t('taskDetail.dueDateLabel') });
         const dateInput = dateCard.createEl('input', { type: 'date' });
         dateInput.value = dateToInputValue(task.dueDateTime?.dateTime || '');
         dateInput.onchange = () => {
@@ -1620,11 +1621,11 @@ export class TodoView extends ItemView {
                 detail,
                 task,
                 () => api.updateTaskDueDate(list.id, task.id, dateInput.value),
-                dateInput.value ? '截止日期已更新' : '截止日期已清除',
+                dateInput.value ? t('taskDetail.dueDateUpdated') : t('taskDetail.dueDateCleared'),
             );
         };
         if (task.dueDateTime?.dateTime) {
-            const clearDate = dateCard.createEl('button', { text: '清除日期', cls: 'todo-link-button' });
+            const clearDate = dateCard.createEl('button', { text: t('taskDetail.clearDate'), cls: 'todo-link-button' });
             clearDate.onclick = () => {
                 void this.saveTaskChange(
                     api,
@@ -1633,7 +1634,7 @@ export class TodoView extends ItemView {
                     detail,
                     task,
                     () => api.updateTaskDueDate(list.id, task.id, ''),
-                    '截止日期已清除',
+                    t('taskDetail.dueDateCleared'),
                 );
             };
         }
@@ -1641,9 +1642,9 @@ export class TodoView extends ItemView {
         const chipsRow = dateCard.createDiv({ cls: 'todo-date-chips' });
         const currentDue = dateToInputValue(task.dueDateTime?.dateTime || '');
         const dateChips: Array<{ label: string; days: number }> = [
-            { label: '今天', days: 0 },
-            { label: '明天', days: 1 },
-            { label: '下周', days: 7 },
+            { label: t('taskDetail.chipToday'), days: 0 },
+            { label: t('taskDetail.chipTomorrow'), days: 1 },
+            { label: t('taskDetail.chipNextWeek'), days: 7 },
         ];
         dateChips.forEach((chip) => {
             const chipDate = new Date();
@@ -1651,7 +1652,7 @@ export class TodoView extends ItemView {
             const chipKey = toLocalDateKey(chipDate);
             const chipBtn = chipsRow.createEl('button', { text: chip.label, cls: 'todo-date-chip' });
             chipBtn.setAttr('type', 'button');
-            chipBtn.setAttr('aria-label', `截止日期设为${chip.label}`);
+            chipBtn.setAttr('aria-label', t('taskDetail.setDueDateAria', { label: chip.label }));
             if (currentDue === chipKey) chipBtn.addClass('is-active');
             chipBtn.onclick = () => {
                 void this.saveTaskChange(
@@ -1661,7 +1662,7 @@ export class TodoView extends ItemView {
                     detail,
                     task,
                     () => api.updateTaskDueDate(list.id, task.id, chipKey),
-                    `截止日期已设为${chip.label}`,
+                    t('taskDetail.dueDateSetTo', { label: chip.label }),
                 );
             };
         });
@@ -1670,11 +1671,11 @@ export class TodoView extends ItemView {
         const noteLabel = noteCard.createDiv({ cls: 'todo-detail-card-label' });
         const noteLabelIcon = noteLabel.createSpan();
         setIcon(noteLabelIcon, 'notebook-pen');
-        noteLabel.createSpan({ text: '备注' });
-        const noteInput = noteCard.createEl('textarea', { cls: 'todo-note-input', placeholder: '添加备注' });
+        noteLabel.createSpan({ text: t('taskDetail.notesLabel') });
+        const noteInput = noteCard.createEl('textarea', { cls: 'todo-note-input', placeholder: t('taskDetail.notePlaceholder') });
         noteInput.value = stripHtml(task.body?.content || '');
         noteInput.rows = 8;
-        const saveNote = noteCard.createEl('button', { text: '保存备注', cls: 'todo-primary-button todo-save-note' });
+        const saveNote = noteCard.createEl('button', { text: t('taskDetail.saveNote'), cls: 'todo-primary-button todo-save-note' });
         saveNote.onclick = () => {
             void this.saveTaskChange(
                 api,
@@ -1683,21 +1684,21 @@ export class TodoView extends ItemView {
                 detail,
                 task,
                 () => api.updateTaskBody(list.id, task.id, noteInput.value),
-                '备注已更新',
+                t('taskDetail.noteUpdated'),
             );
         };
 
         const footer = detail.createDiv({ cls: 'todo-detail-footer' });
         const footerMeta = footer.createDiv({ cls: 'todo-detail-footer-meta' });
-        if (task.createdDateTime) footerMeta.createSpan({ text: `创建于 ${formatDisplayDate(task.createdDateTime)}` });
-        if (task.completedDateTime?.dateTime) footerMeta.createSpan({ text: `完成于 ${formatDisplayDate(task.completedDateTime.dateTime)}` });
+        if (task.createdDateTime) footerMeta.createSpan({ text: t('taskDetail.createdAt', { date: formatDisplayDate(task.createdDateTime) }) });
+        if (task.completedDateTime?.dateTime) footerMeta.createSpan({ text: t('taskDetail.completedAt', { date: formatDisplayDate(task.completedDateTime.dateTime) }) });
 
         const deleteButton = footer.createEl('button', { cls: 'todo-delete-task-button' });
         deleteButton.setAttr('type', 'button');
-        deleteButton.setAttr('aria-label', `删除任务：${task.title}`);
+        deleteButton.setAttr('aria-label', t('taskDetail.deleteTaskAria', { taskTitle: task.title }));
         const deleteIcon = deleteButton.createSpan({ cls: 'todo-delete-task-icon' });
         setIcon(deleteIcon, 'trash-2');
-        deleteButton.createSpan({ text: '删除任务' });
+        deleteButton.createSpan({ text: t('taskDetail.deleteTask') });
         deleteButton.onclick = () => {
             void this.confirmAndDeleteTask(api, list, listArea, detail, task);
         };
@@ -1714,10 +1715,10 @@ export class TodoView extends ItemView {
 
         const confirmed = await new Promise<boolean>((resolve) => {
             new DeleteConfirmModal(this.app, {
-                title: '删除任务？',
-                before: '确定要删除“',
+                title: t('modal.deleteTaskTitle'),
+                before: t('modal.deleteTaskBefore'),
                 bold: task.title,
-                after: '”吗？删除后无法恢复。',
+                after: t('modal.deleteTaskAfter'),
             }, resolve).open();
         });
         if (!confirmed) return;
@@ -1741,7 +1742,7 @@ export class TodoView extends ItemView {
             this.pendingTaskIds.delete(task.id);
             this.removeTaskFromCache(list.id, task.id);
             this.taskListByTaskId.delete(task.id);
-            new Notice('任务已删除');
+            new Notice(t('notices.taskDeleted'));
         } catch (error) {
             this.pendingTaskIds.delete(task.id);
             this.currentTasks = previousCurrentTasks;
@@ -1754,7 +1755,7 @@ export class TodoView extends ItemView {
             }
             this.taskListByTaskId.set(task.id, list);
             this.renderTaskList(api, isSmartViewId(this.selectedListId) ? null : list, listArea, detail);
-            new Notice('删除任务失败，已恢复');
+            new Notice(t('notices.deleteTaskFailedReverted'));
             console.error(error);
         }
     }
@@ -1776,7 +1777,7 @@ export class TodoView extends ItemView {
             new Notice(successMessage);
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
-            new Notice('更新任务失败');
+            new Notice(t('notices.updateTaskFailed'));
             console.error(error);
         }
     }
@@ -1834,12 +1835,12 @@ class DeleteConfirmModal extends Modal {
         message.createSpan({ text: this.options.after });
 
         const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
-        const cancel = actions.createEl('button', { text: '取消' });
+        const cancel = actions.createEl('button', { text: t('common.cancel') });
         cancel.setAttr('type', 'button');
         cancel.onclick = () => this.finish(false);
 
         const confirm = actions.createEl('button', {
-            text: this.options.confirmText ?? '删除',
+            text: this.options.confirmText ?? t('common.delete'),
             cls: 'mod-warning todo-delete-confirm-button',
         });
         confirm.setAttr('type', 'button');
@@ -1873,12 +1874,12 @@ class CreateListModal extends Modal {
     }
 
     onOpen() {
-        this.titleEl.setText('新建清单');
+        this.titleEl.setText(t('sidebar.newList'));
         this.contentEl.addClass('todo-create-list-modal');
 
         this.input = this.contentEl.createEl('input', {
             cls: 'todo-create-list-input',
-            attr: { type: 'text', placeholder: '输入清单名称', maxlength: '64' },
+            attr: { type: 'text', placeholder: t('modal.createListPlaceholder'), maxlength: '64' },
         });
         this.input.addEventListener('keydown', (event: KeyboardEvent) => {
             if (event.key === 'Enter') {
@@ -1889,11 +1890,11 @@ class CreateListModal extends Modal {
         window.setTimeout(() => this.input.focus(), 0);
 
         const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
-        const cancel = actions.createEl('button', { text: '取消' });
+        const cancel = actions.createEl('button', { text: t('common.cancel') });
         cancel.setAttr('type', 'button');
         cancel.onclick = () => this.finish(null);
 
-        const confirm = actions.createEl('button', { text: '创建', cls: 'mod-cta' });
+        const confirm = actions.createEl('button', { text: t('common.create'), cls: 'mod-cta' });
         confirm.setAttr('type', 'button');
         confirm.onclick = () => this.submit();
     }
@@ -1927,7 +1928,7 @@ function buildTaskMeta(task: TodoTask): TaskMeta | null {
     if (task.status === 'completed') {
         const completedDate = task.completedDateTime?.dateTime;
         return {
-            text: completedDate ? formatFriendlyDate(completedDate) : '已完成',
+            text: completedDate ? formatFriendlyDate(completedDate) : t('date.completed'),
             kind: 'completed',
         };
     }
@@ -1940,9 +1941,9 @@ function buildTaskMeta(task: TodoTask): TaskMeta | null {
     tomorrowDate.setDate(tomorrowDate.getDate() + 1);
     const tomorrow = toLocalDateKey(tomorrowDate);
 
-    if (due === today) return { text: '今天', kind: 'today' };
-    if (due === tomorrow) return { text: '明天', kind: 'tomorrow' };
-    if (due < today) return { text: `逾期 · ${formatShortDate(due)}`, kind: 'overdue' };
+    if (due === today) return { text: t('date.today'), kind: 'today' };
+    if (due === tomorrow) return { text: t('date.tomorrow'), kind: 'tomorrow' };
+    if (due < today) return { text: t('date.overdueWithDate', { date: formatShortDate(due) }), kind: 'overdue' };
     return { text: formatShortDate(due), kind: 'date' };
 }
 
@@ -1975,7 +1976,7 @@ function formatShortDate(value: string): string {
     if (parts.length !== 3) return date;
     const month = Number(parts[1]);
     const day = Number(parts[2]);
-    return `${month}月${day}日`;
+    return t('date.shortFormat', { month, day });
 }
 
 function formatFriendlyDate(value: string): string {
@@ -1983,7 +1984,7 @@ function formatFriendlyDate(value: string): string {
     if (!date) return value;
 
     const today = toLocalDateKey(new Date());
-    if (date === today) return '今天';
+    if (date === today) return t('date.today');
     return formatShortDate(date);
 }
 
@@ -1992,7 +1993,7 @@ function formatDisplayDate(value: string): string {
     if (!date) return value;
     const parts = date.split('-');
     if (parts.length !== 3) return date;
-    return `${parts[0]}-${parts[1]}-${parts[2]}`;
+    return t('date.fullFormat', { y: parts[0], m: parts[1], d: parts[2] });
 }
 
 function stripHtml(value: string): string {

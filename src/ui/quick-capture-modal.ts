@@ -2,6 +2,7 @@ import { App, Modal, Notice } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
 import { toLocalDateKey } from './todo-view';
+import { t } from '../i18n';
 
 export class QuickCaptureModal extends Modal {
     private plugin: MsTodoPlugin;
@@ -24,12 +25,12 @@ export class QuickCaptureModal extends Modal {
     }
 
     onOpen() {
-        this.titleEl.setText('快速捕获');
+        this.titleEl.setText(t('modal.quickCaptureTitle'));
         this.contentEl.addClass('todo-quick-capture-modal');
 
         this.titleInput = this.contentEl.createEl('input', {
             cls: 'todo-create-list-input',
-            attr: { type: 'text', placeholder: '想记录什么？', maxlength: '255' },
+            attr: { type: 'text', placeholder: t('modal.quickCapturePlaceholder'), maxlength: '255' },
         });
         this.titleInput.addEventListener('keydown', (event: KeyboardEvent) => {
             if (event.key === 'Enter') {
@@ -41,7 +42,7 @@ export class QuickCaptureModal extends Modal {
         const row = this.contentEl.createDiv({ cls: 'todo-quick-capture-row' });
 
         const listField = row.createDiv({ cls: 'todo-quick-capture-field' });
-        listField.createDiv({ cls: 'todo-quick-capture-label', text: '目标清单' });
+        listField.createDiv({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureTargetList') });
         this.listSelect = listField.createEl('select', { cls: 'todo-quick-capture-select' });
         this.lists.forEach((list) => {
             const option = this.listSelect.createEl('option');
@@ -55,14 +56,14 @@ export class QuickCaptureModal extends Modal {
         const todayField = row.createDiv({ cls: 'todo-quick-capture-field' });
         const todayLabel = todayField.createEl('label', { cls: 'todo-quick-capture-today' });
         this.todayToggle = todayLabel.createEl('input', { type: 'checkbox' });
-        todayLabel.createSpan({ text: '设为今天到期' });
+        todayLabel.createSpan({ text: t('modal.quickCaptureDueToday') });
 
         const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
-        const cancel = actions.createEl('button', { text: '取消' });
+        const cancel = actions.createEl('button', { text: t('common.cancel') });
         cancel.setAttr('type', 'button');
         cancel.onclick = () => this.close();
 
-        this.confirmButton = actions.createEl('button', { text: '添加', cls: 'mod-cta' });
+        this.confirmButton = actions.createEl('button', { text: t('common.add'), cls: 'mod-cta' });
         this.confirmButton.setAttr('type', 'button');
         this.confirmButton.onclick = () => { void this.submit(); };
 
@@ -81,7 +82,7 @@ export class QuickCaptureModal extends Modal {
 
         this.submitting = true;
         this.confirmButton.disabled = true;
-        this.confirmButton.setText('添加中…');
+        this.confirmButton.setText(t('modal.quickCaptureAdding'));
 
         try {
             let task: TodoTask = await this.api.createTask(list.id, title);
@@ -91,13 +92,13 @@ export class QuickCaptureModal extends Modal {
             }
 
             this.plugin.getTodoView()?.handleExternalTaskCreated(task, list, dueToday);
-            new Notice(`已添加到「${list.displayName}」${dueToday ? '，今天到期' : ''}`);
+            new Notice(t('notices.taskAddedTo', { listName: list.displayName }) + (dueToday ? t('notices.taskAddedDueTodaySuffix') : ''));
             this.close();
         } catch (error) {
             this.submitting = false;
             this.confirmButton.disabled = false;
-            this.confirmButton.setText('添加');
-            new Notice('添加任务失败');
+            this.confirmButton.setText(t('common.add'));
+            new Notice(t('notices.addTaskFailed'));
             console.error(error);
         }
     }

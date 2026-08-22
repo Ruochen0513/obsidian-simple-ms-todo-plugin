@@ -1,4 +1,5 @@
 import type { TodoList, TodoTask } from '../api/ms-todo-api';
+import { t } from '../i18n';
 
 interface ListWithTasks {
     list: TodoList;
@@ -9,7 +10,7 @@ export function buildMarkdownDocument(listsWithTasks: ListWithTasks[]): string {
     const lines: string[] = [
         '# Microsoft To Do',
         '',
-        `> 同步时间：${new Date().toLocaleString()}。请在 Microsoft To Do 中编辑任务，然后再次同步。`,
+        t('markdownBlock.syncTimestamp', { date: new Date().toLocaleString() }),
         '',
     ];
 
@@ -17,7 +18,7 @@ export function buildMarkdownDocument(listsWithTasks: ListWithTasks[]): string {
         lines.push(`## ${escapeMarkdown(list.displayName)}`, '');
 
         if (tasks.length === 0) {
-            lines.push('_暂无任务。_', '');
+            lines.push(t('markdownBlock.noTasks'), '');
             return;
         }
 
@@ -48,9 +49,9 @@ function appendTask(lines: string[], task: TodoTask) {
 
     if (task.linkedResources && task.linkedResources.length > 0) {
         task.linkedResources.forEach((resource) => {
-            const label = resource.displayName || resource.applicationName || resource.webUrl || '关联资源';
+            const label = resource.displayName || resource.applicationName || resource.webUrl || t('markdownBlock.linkedResource');
             if (resource.webUrl) {
-                lines.push(`  - ${escapeMarkdown(label)}：${resource.webUrl}`);
+                lines.push(`  - ${escapeMarkdown(label)}${t('markdownBlock.resourceUrlSeparator')}${resource.webUrl}`);
             } else {
                 lines.push(`  - ${escapeMarkdown(label)}`);
             }
@@ -60,10 +61,10 @@ function appendTask(lines: string[], task: TodoTask) {
 
 function buildMetadata(task: TodoTask): string {
     const metadata: string[] = [];
-    if (task.importance === 'high') metadata.push('🔴 重要');
-    if (task.dueDateTime?.dateTime) metadata.push(`截止：${formatDate(task.dueDateTime.dateTime)}`);
-    if (task.reminderDateTime?.dateTime) metadata.push(`提醒：${formatDate(task.reminderDateTime.dateTime)}`);
-    return metadata.length > 0 ? `（${metadata.join('，')}）` : '';
+    if (task.importance === 'high') metadata.push(t('markdownBlock.important'));
+    if (task.dueDateTime?.dateTime) metadata.push(t('markdownBlock.duePrefix', { date: formatDate(task.dueDateTime.dateTime) }));
+    if (task.reminderDateTime?.dateTime) metadata.push(t('markdownBlock.reminderPrefix', { date: formatDate(task.reminderDateTime.dateTime) }));
+    return metadata.length > 0 ? `${t('markdownBlock.metadataOpen')}${metadata.join(t('markdownBlock.metadataJoiner'))}${t('markdownBlock.metadataClose')}` : '';
 }
 
 function formatDate(value: string): string {

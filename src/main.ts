@@ -4,6 +4,7 @@ import { MsTodoApi, TodoList } from './api/ms-todo-api';
 import { TodoView, VIEW_TYPE_TODO, TaskCacheSnapshot } from './ui/todo-view';
 import { QuickCaptureModal } from './ui/quick-capture-modal';
 import { DEFAULT_SETTINGS, MsTodoSettings } from './settings';
+import { t } from './i18n';
 
 export default class MsTodoPlugin extends Plugin {
     settings: MsTodoSettings;
@@ -24,19 +25,19 @@ export default class MsTodoPlugin extends Plugin {
 
         this.addCommand({
             id: 'open-view',
-            name: '打开 Microsoft To Do 侧边栏',
+            name: t('commands.openView'),
             callback: () => { void this.activateView(); },
         });
 
         this.addCommand({
             id: 'quick-capture',
-            name: '快速捕获：添加任务',
+            name: t('commands.quickCapture'),
             callback: () => { void this.openQuickCapture(); },
         });
 
         this.addCommand({
             id: 'sync-to-markdown',
-            name: '同步 Microsoft To Do 到 Markdown',
+            name: t('commands.syncToMarkdown'),
             callback: () => this.syncTasksToMarkdown(),
         });
 
@@ -59,23 +60,23 @@ export default class MsTodoPlugin extends Plugin {
 
     async handleAuthCallback(data: ObsidianProtocolData) {
         if (data.error) {
-            new Notice('授权已取消');
+            new Notice(t('notices.authorizationRefused'));
             return;
         }
 
         if (data.code) {
             try {
-                new Notice('正在连接 Microsoft To Do…');
+                new Notice(t('notices.connecting'));
                 const tokens = await this.auth.exchangeCodeForToken(data.code, this.pkceVerifier);
                 await this.saveTokens(tokens);
-                new Notice('Microsoft To Do 已连接');
+                new Notice(t('notices.connected'));
                 this.refreshView();
                 if (this.settings.syncAfterLogin && this.settings.markdownSyncEnabled) {
                     await this.syncTasksToMarkdown({ silent: true });
                 }
             } catch (error) {
                 console.error(error);
-                new Notice('获取登录令牌失败，请查看控制台。');
+                new Notice(t('notices.tokenFailed'));
             }
         }
     }
@@ -112,7 +113,7 @@ export default class MsTodoPlugin extends Plugin {
 
     async openQuickCapture() {
         if (!this.settings.accessToken) {
-            new Notice('请先登录 Microsoft To Do（打开侧边栏完成登录）');
+            new Notice(t('notices.signInRequiredForQuickCapture'));
             return;
         }
 
@@ -125,7 +126,7 @@ export default class MsTodoPlugin extends Plugin {
             try {
                 lists = await api.getTaskLists();
             } catch (error) {
-                new Notice('获取清单失败');
+                new Notice(t('notices.loadListsFailed'));
                 console.error(error);
                 return;
             }
@@ -139,13 +140,13 @@ export default class MsTodoPlugin extends Plugin {
 
     async syncTasksToMarkdown(options: { silent?: boolean } = {}) {
         if (!this.settings.accessToken) {
-            new Notice('请先登录 Microsoft To Do');
+            new Notice(t('notices.signInRequired'));
             return;
         }
 
         if (!this.settings.markdownSyncEnabled) {
             if (!options.silent) {
-                new Notice('Markdown 同步已关闭，可在插件设置中开启');
+                new Notice(t('notices.markdownSyncDisabled'));
             }
             return;
         }
@@ -154,12 +155,12 @@ export default class MsTodoPlugin extends Plugin {
             const api = new MsTodoApi(this);
             const result = await api.syncAllTasksToMarkdown();
             if (!options.silent) {
-                new Notice(`已将 ${result.listCount} 个清单中的 ${result.taskCount} 个任务同步到 ${result.path}`);
+                new Notice(t('notices.syncCompleted', { listCount: result.listCount, taskCount: result.taskCount, path: result.path }));
             }
         } catch (error) {
             console.error(error);
             if (!options.silent) {
-                new Notice('同步 Microsoft To Do 到 Markdown 失败');
+                new Notice(t('notices.syncFailed'));
             }
         }
     }
@@ -254,10 +255,10 @@ class MsTodoSettingTab extends PluginSettingTab {
 
         if (this.plugin.settings.accessToken) {
             new Setting(containerEl)
-                .setName('账户状态')
-                .setDesc('✅ 已登录')
+                .setName(t('settings.accountStatus'))
+                .setDesc(t('settings.signedIn'))
                 .addButton(btn => btn
-                    .setButtonText('退出登录')
+                    .setButtonText(t('common.signOut'))
                     .setWarning()
                     .onClick(async () => {
                         await this.plugin.clearData();
@@ -266,10 +267,10 @@ class MsTodoSettingTab extends PluginSettingTab {
                 );
         } else {
             new Setting(containerEl)
-                .setName('账户状态')
-                .setDesc('❌ 未登录')
+                .setName(t('settings.accountStatus'))
+                .setDesc(t('settings.notSignedIn'))
                 .addButton(btn => btn
-                    .setButtonText('登录')
+                    .setButtonText(t('common.signIn'))
                     .setCta()
                     .onClick(() => {
                         void this.plugin.login();
@@ -278,8 +279,8 @@ class MsTodoSettingTab extends PluginSettingTab {
         }
 
         new Setting(containerEl)
-            .setName('Markdown 同步')
-            .setDesc('将全部清单单向生成一个 Markdown 文件。关闭后不再创建或更新该文件。')
+            .setName(t('settings.markdownSync'))
+            .setDesc(t('settings.markdownSyncDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.markdownSyncEnabled)
                 .onChange(async (value) => {
@@ -295,8 +296,8 @@ class MsTodoSettingTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
             };
             new Setting(containerEl)
-                .setName('Markdown 同步文件')
-                .setDesc('文件路径。点击输入框会弹出文件夹建议，选择后自动带上当前文件名；目标文件夹会在同步时自动创建。')
+                .setName(t('settings.markdownSyncFile'))
+                .setDesc(t('settings.markdownSyncFileDesc'))
                 .addSearch(search => {
                     syncPathInput = search.inputEl;
                     search
@@ -316,8 +317,8 @@ class MsTodoSettingTab extends PluginSettingTab {
             }
 
             new Setting(containerEl)
-                .setName('登录后同步')
-                .setDesc('成功登录后自动创建或更新 Markdown 同步文件。')
+                .setName(t('settings.syncAfterLogin'))
+                .setDesc(t('settings.syncAfterLoginDesc'))
                 .addToggle(toggle => toggle
                     .setValue(this.plugin.settings.syncAfterLogin)
                     .onChange(async (value) => {
@@ -326,8 +327,8 @@ class MsTodoSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(containerEl)
-                .setName('启动时同步')
-                .setDesc('Obsidian 启动后自动刷新 Markdown 同步文件。')
+                .setName(t('settings.syncOnStartup'))
+                .setDesc(t('settings.syncOnStartupDesc'))
                 .addToggle(toggle => toggle
                     .setValue(this.plugin.settings.syncOnStartup)
                     .onChange(async (value) => {
@@ -336,10 +337,10 @@ class MsTodoSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(containerEl)
-                .setName('手动同步 Markdown')
-                .setDesc('立即获取全部 Microsoft To Do 清单并写入 Markdown 同步文件。')
+                .setName(t('settings.manualSync'))
+                .setDesc(t('settings.manualSyncDesc'))
                 .addButton(btn => btn
-                    .setButtonText('立即同步')
+                    .setButtonText(t('settings.syncNow'))
                     .setCta()
                     .onClick(() => {
                         void this.plugin.syncTasksToMarkdown();

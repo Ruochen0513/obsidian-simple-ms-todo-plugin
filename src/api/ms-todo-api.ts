@@ -2,6 +2,7 @@ import { Notice, normalizePath, requestUrl } from 'obsidian';
 import { AuthManager } from '../auth';
 import type MsTodoPlugin from '../main';
 import { buildMarkdownDocument } from '../sync/markdown';
+import { t } from '../i18n';
 
 const GRAPH_ENDPOINT = 'https://graph.microsoft.com/v1.0';
 
@@ -84,19 +85,19 @@ export class MsTodoApi {
                 }
                 return this.refreshPromise;
             }
-            throw new Error('未找到登录信息');
+            throw new Error(t('apiError.noSignInInfo'));
         }
         return this.plugin.settings.accessToken;
     }
 
     private async refreshTokenOnce(): Promise<string> {
         try {
-            console.warn('Microsoft To Do 登录令牌即将过期，正在刷新…');
+            console.warn(t('apiError.tokenRefreshing'));
             const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
             await this.plugin.saveTokens(newTokens);
             return newTokens.access_token;
         } catch (error) {
-            new Notice('登录已过期，请重新登录 Microsoft To Do。');
+            new Notice(t('apiError.signInExpired'));
             throw error;
         }
     }
