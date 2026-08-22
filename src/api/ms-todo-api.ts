@@ -1,4 +1,4 @@
-import { Notice, requestUrl } from 'obsidian';
+import { Notice, normalizePath, requestUrl } from 'obsidian';
 import { AuthManager } from '../auth';
 import type MsTodoPlugin from '../main';
 import { buildMarkdownDocument } from '../sync/markdown';
@@ -67,6 +67,7 @@ interface GraphCollection<T> {
 export class MsTodoApi {
     plugin: MsTodoPlugin;
     auth: AuthManager;
+    private refreshPromise: Promise<string> | null = null;
 
     constructor(plugin: MsTodoPlugin) {
         this.plugin = plugin;
@@ -77,20 +78,27 @@ export class MsTodoApi {
         const now = Date.now();
         if (this.plugin.settings.tokenExpiresAt - now < 5 * 60 * 1000) {
             if (this.plugin.settings.refreshToken) {
-                try {
-                    console.warn('Token is expiring, refreshing...');
-                    const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
-                    await this.plugin.saveTokens(newTokens);
-                    return newTokens.access_token;
-                } catch (error) {
-                    new Notice('Sign in expired. Please sign in again.');
-                    throw error;
+                if (!this.refreshPromise) {
+                    this.refreshPromise = this.refreshTokenOnce()
+                        .finally(() => { this.refreshPromise = null; });
                 }
-            } else {
-                throw new Error('No sign-in information found');
+                return this.refreshPromise;
             }
+            throw new Error('未找到登录信息');
         }
         return this.plugin.settings.accessToken;
+    }
+
+    private async refreshTokenOnce(): Promise<string> {
+        try {
+            console.warn('Microsoft To Do 登录令牌即将过期，正在刷新…');
+            const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
+            await this.plugin.saveTokens(newTokens);
+            return newTokens.access_token;
+        } catch (error) {
+            new Notice('登录已过期，请重新登录 Microsoft To Do。');
+            throw error;
+        }
     }
 
     async request<T>(url: string, method: string = 'GET', body?: Record<string, unknown>): Promise<T> {
@@ -106,7 +114,7 @@ export class MsTodoApi {
         });
 
         if (method === 'DELETE' || response.status === 204) {
-            return undefined as T;
+            return undefined as unknown as T;
         }
 
         return response.json as T;
@@ -148,6 +156,27 @@ export class MsTodoApi {
         return this.request<TodoTask>(`${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks`, 'POST', { title });
     }
 
+    async deleteTask(listId: string, taskId: string): Promise<void> {
+        await this.request<void>(`${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks/${taskId}`, 'DELETE');
+    }
+
+    async createChecklistItem(listId: string, taskId: string, displayName: string): Promise<ChecklistItem> {
+        return this.request<ChecklistItem>(`${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`, 'POST', { displayName });
+    }
+
+    async updateChecklistItem(
+        listId: string,
+        taskId: string,
+        itemId: string,
+        payload: { displayName?: string; isChecked?: boolean },
+    ): Promise<ChecklistItem> {
+        return this.request<ChecklistItem>(`${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks/${taskId}/checklistItems/${itemId}`, 'PATCH', payload as Record<string, unknown>);
+    }
+
+    async deleteChecklistItem(listId: string, taskId: string, itemId: string): Promise<void> {
+        await this.request<void>(`${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks/${taskId}/checklistItems/${itemId}`, 'DELETE');
+    }
+
     async updateTask(listId: string, taskId: string, payload: UpdateTaskPayload): Promise<TodoTask> {
         return this.request<TodoTask>(`${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks/${taskId}`, 'PATCH', payload as Record<string, unknown>);
     }
@@ -173,6 +202,22 @@ export class MsTodoApi {
         return this.updateTask(listId, task.id, { importance: task.importance === 'high' ? 'normal' : 'high' });
     }
 
+    private async ensureSyncFolderExists(path: string) {
+        const folder = path.split('/').slice(0, -1).join('/');
+        if (!folder) return;
+        if (await this.plugin.app.vault.adapter.exists(folder)) return;
+        let acc = '';
+        for (const part of folder.split('/')) {
+            acc = acc ? `${acc}/${part}` : part;
+            if (await this.plugin.app.vault.adapter.exists(acc)) continue;
+            try {
+                await this.plugin.app.vault.createFolder(acc);
+            } catch (error) {
+                // 忽略：文件夹可能已被并发创建
+            }
+        }
+    }
+
     async syncAllTasksToMarkdown(): Promise<{ path: string; listCount: number; taskCount: number }> {
         const lists = await this.getTaskLists();
         const listsWithTasks = await Promise.all(lists.map(async (list) => ({
@@ -180,8 +225,10 @@ export class MsTodoApi {
             tasks: await this.getTasks(list.id, true),
         })));
         const markdown = buildMarkdownDocument(listsWithTasks);
-        await this.plugin.app.vault.adapter.write(this.plugin.settings.markdownSyncPath, markdown);
+        const targetPath = normalizePath(this.plugin.settings.markdownSyncPath || 'Microsoft To Do.md');
+        await this.ensureSyncFolderExists(targetPath);
+        await this.plugin.app.vault.adapter.write(targetPath, markdown);
         const taskCount = listsWithTasks.reduce((sum, item) => sum + item.tasks.length, 0);
-        return { path: this.plugin.settings.markdownSyncPath, listCount: lists.length, taskCount };
+        return { path: targetPath, listCount: lists.length, taskCount };
     }
 }
