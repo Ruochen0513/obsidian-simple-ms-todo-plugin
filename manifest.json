@@ -1,8 +1,8 @@
 {
 	"id": "simple-microsoft-todo",
 	"name": "Simple Microsoft To Do",
-	"version": "1.2",
-	"minAppVersion": "0.15.0",
+	"version": "1.2.0",
+	"minAppVersion": "1.7.2",
 	"description": "Integrate Microsoft To Do in sidebar.",
 	"author": "Ruochen0513",
 	"authorUrl": "https://github.com/Ruochen0513",

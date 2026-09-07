@@ -1,6 +1,6 @@
 {
 	"name": "simple-microsoft-todo",
-	"version": "1.2",
+	"version": "1.2.0",
 	"description": "Microsoft To Do integration.",
 	"main": "main.js",
 	"scripts": {
