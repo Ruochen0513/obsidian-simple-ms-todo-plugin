@@ -128,9 +128,12 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
         { label: t('taskDetail.chipNextWeek'), days: 7 },
     ];
     dateChips.forEach((chip) => {
-        const chipDate = new Date();
-        chipDate.setDate(chipDate.getDate() + chip.days);
-        const chipKey = toLocalDateKey(chipDate);
+        const getDateKey = () => {
+            const date = new Date();
+            date.setDate(date.getDate() + chip.days);
+            return toLocalDateKey(date);
+        };
+        const chipKey = getDateKey();
         const chipBtn = chipsRow.createEl('button', { text: chip.label, cls: 'todo-date-chip' });
         chipBtn.setAttr('type', 'button');
         chipBtn.setAttr('aria-label', t('taskDetail.setDueDateAria', { label: chip.label }));
@@ -143,7 +146,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
                 listArea,
                 detail,
                 task,
-                () => api.updateTaskDueDate(list.id, task.id, chipKey),
+                () => api.updateTaskDueDate(list.id, task.id, getDateKey()),
                 t('taskDetail.dueDateSetTo', { label: chip.label }),
             );
         };

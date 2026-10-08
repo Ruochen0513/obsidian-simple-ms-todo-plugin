@@ -3,6 +3,106 @@ const { test } = require('node:test');
 const { setup, deferred, Element, list } = require('./helpers.cjs');
 const settled = () => new Promise(resolve => setImmediate(resolve));
 
+test('an older list refresh cannot remove a newly created list or its task cache', async () => {
+    const { view, api } = setup();
+    const response = deferred();
+    api.getTaskLists = () => response.promise;
+    const refreshing = view.refreshListsInBackground(api);
+    const created = { id: 'new-list', displayName: 'New list' };
+    api.createTaskList = async () => created;
+    await view.createList(api, created.displayName);
+    view.selectedListId = created.id;
+    const cache = view.taskCache.get(created.id);
+    response.resolve([list]);
+    await refreshing;
+    assert(view.currentLists.some(item => item.id === created.id));
+    assert.equal(view.taskCache.get(created.id), cache);
+    assert.equal(view.selectedListId, created.id);
+
+    api.getTaskLists = async () => [list, { ...created, displayName: 'Renamed remotely' }];
+    await view.refreshListsInBackground(api);
+    assert.equal(view.currentLists.at(-1).displayName, 'Renamed remotely');
+});
+
+test('an older list refresh cannot bring back a deleted list', async () => {
+    const { view, api, modals } = setup();
+    const removed = { id: 'removed-list', displayName: 'Remove me' };
+    view.currentLists.push(removed);
+    view.setTaskCache(removed.id, [], true);
+    await view.persistTaskCache();
+    const response = deferred();
+    api.getTaskLists = () => response.promise;
+    const refreshing = view.refreshListsInBackground(api);
+    api.deleteTaskList = async () => {};
+    api.constructor.prototype.getTaskLists = async () => [list];
+    view.renderShell = async () => {};
+    const deleting = view.deleteList(api, removed);
+    modals[0].contentEl.querySelector('.todo-delete-confirm-button').onclick();
+    await deleting;
+    response.resolve([list, removed]);
+    await refreshing;
+    assert.equal(view.currentLists.some(item => item.id === removed.id), false);
+    assert.equal(view.taskCache.has(removed.id), false);
+    assert.equal(view.plugin.taskCacheSnapshot.lists.some(item => item.id === removed.id), false);
+});
+
+test('a delayed list deletion cannot change the state after signing out', async () => {
+    const { view, api, plugin, modals, notices } = setup();
+    const response = deferred();
+    api.deleteTaskList = () => response.promise;
+    const deleting = view.deleteList(api, list);
+    modals[0].contentEl.querySelector('.todo-delete-confirm-button').onclick();
+    await settled();
+    plugin.session.signOut();
+    await view.render();
+    response.resolve();
+    await deleting;
+    assert.equal(view.currentLists.length, 0);
+    assert.equal(view.taskCache.size, 0);
+    assert.equal(notices.length, 0);
+});
+
+test('a failed list creation still allows an in-flight refresh to apply remote changes', async () => {
+    const { view, api } = setup();
+    const response = deferred();
+    api.getTaskLists = () => response.promise;
+    const refreshing = view.refreshListsInBackground(api);
+    api.createTaskList = async () => { throw new Error('Offline'); };
+    assert.equal(await view.createList(api, 'New list'), null);
+    response.resolve([{ ...list, displayName: 'Remote name' }]);
+    await refreshing;
+    assert.equal(view.currentLists[0].displayName, 'Remote name');
+});
+
+test('redrawing the sidebar releases old document listeners and keeps only the current shell', async () => {
+    const { view, api } = setup();
+    const listeners = new Set();
+    const watchRegistrations = owner => {
+        const register = owner.registerDomEvent.bind(owner);
+        owner.registerDomEvent = (el, name, callback) => {
+            register(el, name, callback);
+            if (name !== 'click' || el.activeElement === undefined) return;
+            listeners.add(callback);
+            owner.register(() => listeners.delete(callback));
+        };
+    };
+    watchRegistrations(view);
+    const addChild = view.addChild.bind(view);
+    view.addChild = child => { watchRegistrations(child); return addChild(child); };
+    view.renderShell = async (_api, container) => {
+        view.renderViewSelector(api, container, view.currentLists, new Element());
+        view.renderSearchBar(api, container, new Element(), view.currentLists);
+    };
+    // Render creates its own API; supply list reads on this view's API class.
+    api.constructor.prototype.getTaskLists = async () => [list];
+    for (let i = 0; i < 5; i++) {
+        await view.render();
+        assert.equal(listeners.size, 2);
+    }
+    await view.onClose();
+    assert.equal(listeners.size, 0);
+});
+
 function menu(view, api) {
     const host = new Element();
     view.renderViewSelector(api, host, view.currentLists, new Element());

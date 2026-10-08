@@ -2,6 +2,24 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { setup, Element, list, task } = require('./helpers.cjs');
 
+test('date shortcuts use the click date after an open detail crosses midnight and month end', () => {
+    for (const [index, expected] of ['2026-11-01', '2026-11-02', '2026-11-08'].entries()) {
+        let now = new Date(2026, 9, 31, 23, 59).getTime();
+        class ClockDate extends Date {
+            constructor(...args) { super(...(args.length ? args : [now])); }
+            static now() { return now; }
+        }
+        const { view, api } = setup({ Date: ClockDate });
+        let savedDate;
+        api.updateTaskDueDate = async (_list, _task, value) => { savedDate = value; return task; };
+        view.saveTaskChange = async (_api, _list, _area, _detail, _task, save) => save();
+        view.selectTask(api, list, view.mainListArea, view.mainDetail, task);
+        now = new Date(2026, 10, 1, 0, 1).getTime();
+        view.mainDetail.querySelectorAll('.todo-date-chip')[index].onclick();
+        assert.equal(savedDate, expected);
+    }
+});
+
 test('the date field toggles on repeated clicks without changing its value or leaking scopes', () => {
     const { attachDatePicker, plugin, pickers, scopes, frames } = setup();
     const input = new Element();

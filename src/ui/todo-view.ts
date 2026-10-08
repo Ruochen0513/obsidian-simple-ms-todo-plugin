@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
+import { Component, ItemView, Menu, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
 import { syncTasksToMarkdown } from '../commands';
@@ -54,6 +54,8 @@ export class TodoView extends ItemView {
     taskComposerDraft = { value: '', submitting: false };
     updateTaskComposer?: () => void;
     private cacheSession: number;
+    private listMutationVersion = 0;
+    private shellEvents?: Component;
 
     constructor(leaf: WorkspaceLeaf, plugin: MsTodoPlugin) {
         super(leaf);
@@ -72,6 +74,7 @@ export class TodoView extends ItemView {
 
     async onClose() {
         this.updateTaskComposer = undefined;
+        this.clearShellEvents();
         this.clearDetailControls();
         this.clearSearchState();
         this.flushTaskCachePersist();
@@ -79,6 +82,7 @@ export class TodoView extends ItemView {
 
     async render() {
         this.updateTaskComposer = undefined;
+        this.clearShellEvents();
         this.clearDetailControls();
         const accountChanged = this.cacheSession !== this.plugin.session.version;
         this.cacheSession = this.plugin.session.version;
@@ -240,6 +244,7 @@ export class TodoView extends ItemView {
         lists: TodoList[],
         main: HTMLElement,
     ) {
+        const owner = this.shellEvents ??= this.addChild(new Component());
         const wrapper = parent.createDiv({ cls: 'todo-view-selector-wrap' });
         const selector = wrapper.createEl('button', { cls: 'todo-view-selector' });
         selector.setAttr('type', 'button');
@@ -367,7 +372,12 @@ export class TodoView extends ItemView {
         const outsideClick = (event: MouseEvent) => {
             if (!wrapper.contains(event.target as Node)) closeMenu();
         };
-        this.registerDomEvent(document, 'click', outsideClick);
+        owner.registerDomEvent(document, 'click', outsideClick);
+    }
+
+    private clearShellEvents() {
+        if (this.shellEvents) this.removeChild(this.shellEvents);
+        this.shellEvents = undefined;
     }
 
     isSearchMode(): boolean {
@@ -383,6 +393,7 @@ export class TodoView extends ItemView {
     }
 
     renderSearchBar(api: MsTodoApi, host: HTMLElement, main: HTMLElement, lists: TodoList[]) {
+        const owner = this.shellEvents ??= this.addChild(new Component());
         this.searchHostEl = host;
         const bar = host.createDiv({ cls: 'todo-search-bar' });
         const icon = bar.createSpan({ cls: 'todo-search-icon' });
@@ -415,7 +426,7 @@ export class TodoView extends ItemView {
             else open();
         };
 
-        this.registerDomEvent(document, 'click', (event: MouseEvent) => {
+        owner.registerDomEvent(document, 'click', (event: MouseEvent) => {
             if (host !== this.searchHostEl) return;
             if (!host.hasClass('is-searching')) return;
             const target = event.target as HTMLElement | null;
@@ -624,6 +635,7 @@ export class TodoView extends ItemView {
         try {
             const list = await api.createTaskList(name);
             if (!api.isCurrentSession()) return null;
+            this.listMutationVersion++;
             this.currentLists.push(list);
             this.setTaskCache(list.id, [], true);
             this.updateTaskComposer?.();
@@ -648,8 +660,12 @@ export class TodoView extends ItemView {
 
         try {
             await api.deleteTaskList(list.id);
+            if (!api.isCurrentSession()) return;
+            this.listMutationVersion++;
+            this.currentLists = this.currentLists.filter(item => item.id !== list.id);
             this.taskCache.delete(list.id);
             this.scheduleCachePersist();
+            this.flushTaskCachePersist();
             if (this.selectedListId === list.id) {
                 this.selectedListId = PLANNED_VIEW_ID;
                 this.selectedTaskId = null;
@@ -761,9 +777,10 @@ export class TodoView extends ItemView {
     }
 
     async refreshListsInBackground(api: MsTodoApi) {
+        const mutationVersion = this.listMutationVersion;
         try {
             const freshLists = await api.getTaskLists();
-            if (!api.isCurrentSession()) return;
+            if (!api.isCurrentSession() || mutationVersion !== this.listMutationVersion) return;
             if (!freshLists || freshLists.length === 0) return;
 
             const freshIds = new Set(freshLists.map((list) => list.id));

@@ -111,6 +111,7 @@ function setup(options = {}) {
     const timers = new Map();
     const frames = new Map();
     const notices = [];
+    const modals = [];
     const leaves = [];
     const secrets = new Map();
     const storage = {
@@ -161,13 +162,18 @@ function setup(options = {}) {
             removeCommand(id) { this.commands.delete(id); }
         },
         ItemView: class extends Component { constructor() { super(); this.contentEl = new Element(); } },
-        Modal: class { constructor(app) { this.app = app; this.scope = new Scope(); } close() { this.closed = true; this.onClose?.(); } },
+        Modal: class {
+            constructor(app) { this.app = app; this.scope = new Scope(); this.titleEl = new Element(); this.contentEl = new Element(); }
+            open() { modals.push(this); this.onOpen?.(); }
+            close() { this.closed = true; this.onClose?.(); }
+        },
         PluginSettingTab: class {}, AbstractInputSuggest: class {},
         Notice: class { constructor(message) { notices.push(message); } },
         getLanguage: () => host.language, setIcon() {}, normalizePath: value => value,
         requestUrl: (...args) => network.request(...args),
     };
     const context = {
+        Date: options.Date || Date,
         module: { exports: {} },
         require: name => {
             if (name === 'obsidian') return obsidian;
@@ -209,7 +215,7 @@ function setup(options = {}) {
     view.mainListArea = new Element();
     view.mainDetail = new Element();
     const api = new exports.MsTodoApi(plugin);
-    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host, pickers, scopes, frames };
+    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host, pickers, scopes, frames, modals };
 }
 
 module.exports = { setup, deferred, Element, list, task };
