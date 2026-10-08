@@ -34,6 +34,83 @@
     background: var(--background-primary);
 }
 
+.todo-capture-entry {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    height: auto;
+    margin: 8px 12px 12px;
+    padding: 4px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 5px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: 400;
+    text-align: start;
+    cursor: text;
+}
+
+.todo-capture-entry:focus-within {
+    border-color: var(--interactive-accent);
+}
+
+.todo-app-shell:has(.todo-detail-panel.is-open) > .todo-capture-entry {
+    display: none;
+}
+
+.ms-todo-container .todo-capture-entry input.todo-capture-input,
+.ms-todo-container .todo-capture-entry input.todo-capture-input:is(:hover, :focus) {
+    flex: 1;
+    min-width: 0;
+    width: 0;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none;
+    font-size: var(--font-ui-small);
+}
+
+.ms-todo-container button.todo-capture-submit {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.ms-todo-container button.todo-capture-submit:not(:disabled):hover {
+    background: var(--background-modifier-hover);
+    color: var(--interactive-accent);
+}
+
+.ms-todo-container button.todo-capture-submit:disabled {
+    cursor: default;
+}
+
+.todo-capture-submit svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.todo-capture-input::placeholder {
+    color: var(--text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .todo-capture-entry:hover { background: var(--background-modifier-hover); }
+}
+
 /* Header */
 .todo-header {
     flex: 0 0 auto;
@@ -1260,6 +1337,43 @@ body.theme-dark .todo-signed-out {
 
 .todo-list-menu-create {
     color: var(--text-muted);
+}
+
+.todo-list-create [hidden] { display: none !important; }
+
+.todo-list-create-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) 20px;
+    align-items: center;
+    min-width: 0;
+    min-height: 42px;
+    padding: 8px 10px;
+    gap: 10px;
+    border: 0;
+    border-radius: 8px;
+}
+
+.todo-list-create-row:focus-within {
+    background: var(--background-modifier-hover);
+}
+
+.ms-todo-container .todo-list-create-row button.todo-icon-button {
+    width: 20px;
+    min-width: 20px;
+    height: 24px;
+}
+
+.ms-todo-container .todo-list-create input.todo-list-create-input,
+.ms-todo-container .todo-list-create input.todo-list-create-input:is(:hover, :focus) {
+    width: 100%;
+    min-width: 0;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none;
+    font-size: 13.5px;
 }
 
 .todo-list-menu-separator {

@@ -9,6 +9,7 @@ const source = buildSync({
             export { TodoView } from './src/ui/todo-view';
             export { MsTodoApi } from './src/api/ms-todo-api';
             export { QuickCaptureModal } from './src/ui/quick-capture-modal';
+            export { openQuickCapture } from './src/commands';
             export { attachDatePicker } from './src/ui/date-picker';
             export { buildMarkdownDocument } from './src/sync/markdown';
             export { DEFAULT_SETTINGS } from './src/settings';
@@ -142,6 +143,7 @@ function setup(options = {}) {
             isOpen: false, destroyed: false,
             open() { this.isOpen = true; config.onOpen(); },
             close() { this.isOpen = false; config.onClose(); },
+            toggle() { this.isOpen ? this.close() : this.open(); },
             destroy() { this.destroyed = true; },
             clear() { input.value = ''; input.onchange?.(); },
             setDate(date) { input.value = date.toISOString().slice(0, 10); input.onchange?.(); },
@@ -187,6 +189,7 @@ function setup(options = {}) {
     runInNewContext(source, context);
     const exports = context.module.exports;
     const plugin = new exports.MsTodoPlugin();
+    plugin.manifest = { id: 'simple-microsoft-todo' };
     plugin.settings = { ...exports.DEFAULT_SETTINGS };
     const scopes = [];
     plugin.app = { workspace: { getLeavesOfType: () => leaves }, secretStorage: storage,

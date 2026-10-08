@@ -32,6 +32,9 @@ export const en = {
     'settings.languageAuto': 'Follow Obsidian',
     'settings.languageEn': 'English',
     'settings.languageZhCn': '简体中文',
+    'settings.defaultView': 'Default sidebar view',
+    'settings.defaultViewDesc': 'Start in Planned or one of your lists. If the list is unavailable, show Planned.',
+    'settings.unavailableList': 'Saved list unavailable',
 
     'notices.loadingMsTodo': 'Loading Microsoft To Do...',
     'notices.loadFailed': 'Could not load tasks. Try refreshing.',
@@ -58,11 +61,16 @@ export const en = {
     'notices.addTaskFailed': 'Failed to add task',
 
     'sidebar.searchTasks': 'Search tasks',
+    'sidebar.addTask': 'Add task',
+    'sidebar.quickInput': 'Quick input',
+    'sidebar.quickInputShortcut': 'Quick input {hotkey}',
+    'sidebar.addTaskHint': 'Press Enter to add to "{listName}"',
     'sidebar.currentViewAria': 'Current view: {viewName}',
     'sidebar.currentListAria': 'Current list: {listName}',
     'sidebar.switchViewAria': 'Switch view or list',
     'sidebar.lists': 'My lists',
     'sidebar.newList': 'Create list',
+    'sidebar.listName': 'List name, press Enter to create',
     'sidebar.syncToNote': 'Export to note',
     'sidebar.deleteCurrentList': 'Delete current list',
     'sidebar.loadingListAria': 'Loading list',
@@ -75,7 +83,7 @@ export const en = {
     'search.emptySubtitle': 'Try a different keyword.',
 
     'empty.defaultTitle': 'No tasks',
-    'empty.defaultSubtitle': 'Use Quick capture: add a task to record something new.',
+    'empty.defaultSubtitle': 'Type a task below and press Enter to add it.',
     'empty.noListsTitle': 'Create your first list',
     'empty.noListsSubtitle': 'No lists available in Microsoft To Do yet.',
 

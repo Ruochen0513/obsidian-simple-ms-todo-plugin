@@ -6,6 +6,7 @@ export interface MsTodoSettings {
     syncAfterLogin: boolean;
     syncOnStartup: boolean;
     locale: LocalePreference;
+    defaultViewId: string;
 }
 
 export const DEFAULT_SETTINGS: MsTodoSettings = {
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: MsTodoSettings = {
     syncAfterLogin: true,
     syncOnStartup: false,
     locale: 'auto',
+    defaultViewId: '__planned__',
 };
 
 export function readSettings(value: unknown): MsTodoSettings {
@@ -28,6 +30,9 @@ export function readSettings(value: unknown): MsTodoSettings {
     }
     if (data.locale === 'auto' || data.locale === 'en' || data.locale === 'zh-cn') {
         settings.locale = data.locale;
+    }
+    if (typeof data.defaultViewId === 'string' && data.defaultViewId.trim() && data.defaultViewId.trim() !== '__completed__') {
+        settings.defaultViewId = data.defaultViewId.trim();
     }
     return settings;
 }

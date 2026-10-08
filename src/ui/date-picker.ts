@@ -28,9 +28,18 @@ import { getLocale, t } from '../i18n';
 
 export function attachDatePicker(app: App, owner: Component, input: HTMLInputElement, parentScope?: Scope | null): () => void {
     const component = owner.addChild(new Component());
+    const win = input.ownerDocument.defaultView ?? window;
     const scope = new Scope(parentScope || app.scope);
     let scopeActive = false;
+    let pointerOpening = false;
+    let openingFrame: number | null = null;
+    let openingAnimation: Animation | undefined;
     const releaseScope = () => {
+        if (openingFrame !== null) win.cancelAnimationFrame(openingFrame);
+        openingFrame = null;
+        openingAnimation?.cancel();
+        openingAnimation = undefined;
+        pointerOpening = false;
         if (scopeActive) app.keymap.popScope(scope);
         scopeActive = false;
         input.setAttr('aria-expanded', 'false');
@@ -42,12 +51,25 @@ export function attachDatePicker(app: App, owner: Component, input: HTMLInputEle
         locale: { ...(chinese ? Mandarin : {}), firstDayOfWeek: 1 },
         monthSelectorType: 'static',
         disableMobile: true,
+        clickOpens: false,
         animate: false,
         appendTo: input.closest<HTMLElement>('.modal-container') || input.ownerDocument.body,
         onOpen: () => {
             if (!scopeActive) app.keymap.pushScope(scope);
             scopeActive = true;
             input.setAttr('aria-expanded', 'true');
+            if (!pointerOpening) return;
+            pointerOpening = false;
+            // Flatpickr positions the calendar after onOpen; animate before the next paint.
+            openingFrame = win.requestAnimationFrame(() => {
+                openingFrame = null;
+                const above = calendar.hasClass('arrowBottom');
+                calendar.style.transformOrigin = `${calendar.hasClass('rightMost') ? 'right' : 'left'} ${above ? 'bottom' : 'top'}`;
+                const frames: Keyframe[] = win.matchMedia('(prefers-reduced-motion: reduce)').matches
+                    ? [{ opacity: 0 }, { opacity: 1 }]
+                    : [{ opacity: 0, transform: `translateY(${above ? 4 : -4}px) scale(0.97)` }, { opacity: 1, transform: 'none' }];
+                openingAnimation = calendar.animate(frames, { duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
+            });
         },
         onClose: releaseScope,
         onDayCreate: (_dates, _value, _picker, day) => {
@@ -65,6 +87,17 @@ export function attachDatePicker(app: App, owner: Component, input: HTMLInputEle
     calendar.setAttr('role', 'dialog');
     calendar.setAttr('aria-label', t('taskDetail.dueDateLabel'));
     picker.currentYearElement.setAttr('aria-label', t('calendar.year'));
+    component.registerDomEvent(input, 'pointerdown', () => { pointerOpening = true; });
+    component.registerDomEvent(input, 'click', () => { picker.toggle(); });
+    component.registerDomEvent(input, 'keydown', event => {
+        pointerOpening = false;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        // Handle activation before Flatpickr's Enter listener can open it again.
+        event.stopImmediatePropagation();
+        picker.toggle();
+    }, true);
+    component.registerDomEvent(input, 'blur', () => { pointerOpening = false; });
 
     for (const [arrow, delta, label, icon] of [
         [picker.prevMonthNav, -1, t('calendar.previousMonth'), 'chevron-left'],

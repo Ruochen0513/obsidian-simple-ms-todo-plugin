@@ -3,6 +3,7 @@ import type MsTodoPlugin from '../main';
 import { DEFAULT_SETTINGS } from '../settings';
 import { syncTasksToMarkdown } from '../commands';
 import { t, type LocalePreference } from '../i18n';
+import { MsTodoApi, type TodoList } from '../api/ms-todo-api';
 
 class FolderPathSuggest extends AbstractInputSuggest<string> {
     private onChoose: (folderPath: string) => void;
@@ -91,6 +92,45 @@ export class MsTodoSettingTab extends PluginSettingTab {
                     await this.plugin.setPluginLocale(value as LocalePreference);
                     this.display();
                 }));
+
+        new Setting(containerEl)
+            .setName(t('settings.defaultView'))
+            .setDesc(t('settings.defaultViewDesc'))
+            .addDropdown(dropdown => {
+                const populate = (lists: TodoList[]) => {
+                    dropdown.selectEl.empty();
+                    dropdown.addOption('__planned__', t('smartView.planned'));
+                    lists.forEach(list => dropdown.addOption(list.id, list.displayName));
+                    const selected = this.plugin.settings.defaultViewId;
+                    if (selected !== '__planned__' && !lists.some(list => list.id === selected)) {
+                        dropdown.addOption(selected, t('settings.unavailableList'));
+                    }
+                    dropdown.setValue(selected);
+                };
+                populate(this.plugin.getTodoView()?.currentLists || this.plugin.taskCacheSnapshot?.lists || []);
+                dropdown.onChange(async value => {
+                    this.plugin.settings.defaultViewId = value;
+                    await this.plugin.saveSettings();
+                    const view = this.plugin.getTodoView();
+                    if (view) {
+                        view.selectedListId = value;
+                        view.selectedTaskId = null;
+                        view.showEarlier = false;
+                        await view.render();
+                    }
+                });
+                if (this.plugin.session.signedIn) {
+                    const api = new MsTodoApi(this.plugin);
+                    void api.getTaskLists().then(lists => {
+                        if (api.isCurrentSession() && dropdown.selectEl.isConnected) populate(lists);
+                    }).catch(error => {
+                        if (api.isCurrentSession() && dropdown.selectEl.isConnected) {
+                            dropdown.selectEl.setAttr('title', t('notices.loadListsFailed'));
+                            console.warn('Microsoft To Do: failed to load default view choices', error);
+                        }
+                    });
+                }
+            });
 
         new Setting(containerEl)
             .setName(t('settings.markdownSync'))

@@ -34,6 +34,9 @@ export const zhCn: Record<TranslationKey, string> = {
     'settings.languageAuto': '跟随 Obsidian 语言',
     'settings.languageEn': 'English',
     'settings.languageZhCn': '简体中文',
+    'settings.defaultView': '侧边栏默认入口',
+    'settings.defaultViewDesc': '选择计划内或自己的清单；清单不可用时显示计划内。',
+    'settings.unavailableList': '已选清单暂不可用',
 
     'notices.loadingMsTodo': '正在加载 Microsoft To Do…',
     'notices.loadFailed': '无法加载任务，请尝试刷新。',
@@ -60,11 +63,16 @@ export const zhCn: Record<TranslationKey, string> = {
     'notices.addTaskFailed': '添加任务失败',
 
     'sidebar.searchTasks': '搜索任务',
+    'sidebar.addTask': '添加任务',
+    'sidebar.quickInput': '快捷输入',
+    'sidebar.quickInputShortcut': '快捷输入 {hotkey}',
+    'sidebar.addTaskHint': '回车添加到「{listName}」',
     'sidebar.currentViewAria': '当前视图：{viewName}',
     'sidebar.currentListAria': '当前清单：{listName}',
     'sidebar.switchViewAria': '切换视图或清单',
     'sidebar.lists': '我的清单',
     'sidebar.newList': '新建清单',
+    'sidebar.listName': '清单名称，回车创建',
     'sidebar.syncToNote': '导出到笔记',
     'sidebar.deleteCurrentList': '删除当前清单',
     'sidebar.loadingListAria': '正在加载清单',
@@ -77,7 +85,7 @@ export const zhCn: Record<TranslationKey, string> = {
     'search.emptySubtitle': '换个关键词试试。',
 
     'empty.defaultTitle': '这里暂时没有任务',
-    'empty.defaultSubtitle': '使用“快速捕获：添加任务”命令记录新任务。',
+    'empty.defaultSubtitle': '在下方输入任务，按回车添加。',
     'empty.noListsTitle': '创建第一个清单',
     'empty.noListsSubtitle': 'Microsoft To Do 中还没有可用清单。',
 

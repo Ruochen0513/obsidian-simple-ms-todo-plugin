@@ -7,8 +7,10 @@ import { taskBodyText } from '../utils/task-body';
 import { buildTaskMeta, toLocalDateKey, isTaskOverdue, formatShortDate } from '../utils/task-dates';
 import { getPlannedDate, isPlannedTask, groupPlannedTasks } from '../utils/planned-tasks';
 import type { TaskCacheEntry, TaskCacheSnapshot } from '../sync/task-cache';
-import { DeleteConfirmModal, CreateListModal } from './task-modals';
+import { DeleteConfirmModal } from './task-modals';
 import { renderTaskDetail } from './task-detail';
+import { renderTaskComposer } from './task-composer';
+import { renderListComposer } from './list-composer';
 import { checklistOrderKey } from '../utils/checklist-order';
 
 export const VIEW_TYPE_TODO = 'ms-todo-view';
@@ -49,11 +51,14 @@ export class TodoView extends ItemView {
     pendingChecklistOrderTaskIds = new Set<string>();
     disposeDetailSteps?: () => void;
     disposeDetailDatePicker?: () => void;
+    taskComposerDraft = { value: '', submitting: false };
+    updateTaskComposer?: () => void;
     private cacheSession: number;
 
     constructor(leaf: WorkspaceLeaf, plugin: MsTodoPlugin) {
         super(leaf);
         this.plugin = plugin;
+        this.selectedListId = plugin.settings.defaultViewId;
         this.cacheSession = plugin.session.version;
     }
 
@@ -66,12 +71,14 @@ export class TodoView extends ItemView {
     }
 
     async onClose() {
+        this.updateTaskComposer = undefined;
         this.clearDetailControls();
         this.clearSearchState();
         this.flushTaskCachePersist();
     }
 
     async render() {
+        this.updateTaskComposer = undefined;
         this.clearDetailControls();
         const accountChanged = this.cacheSession !== this.plugin.session.version;
         this.cacheSession = this.plugin.session.version;
@@ -85,6 +92,7 @@ export class TodoView extends ItemView {
         container.addClass('ms-todo-container');
 
         if (!this.plugin.session.signedIn || accountChanged) {
+            this.taskComposerDraft = { value: '', submitting: false };
             if (this.cachePersistTimer !== null) window.clearTimeout(this.cachePersistTimer);
             this.cachePersistTimer = null;
             this.taskCache.clear();
@@ -95,7 +103,7 @@ export class TodoView extends ItemView {
             this.pendingTaskIds.clear();
             this.pendingChecklistItemIds.clear();
             this.recentlyMutatedTaskIds.clear();
-            this.selectedListId = PLANNED_VIEW_ID;
+            this.selectedListId = this.plugin.settings.defaultViewId;
             this.selectedTaskId = null;
             this.showEarlier = false;
             this.currentLists = [];
@@ -164,10 +172,21 @@ export class TodoView extends ItemView {
         const hero = container.createDiv({ cls: 'todo-signed-out' });
         const icon = hero.createDiv({ cls: 'todo-signed-out-icon' });
         setIcon(icon, 'list-plus');
-        hero.createEl('h3', { text: t('empty.noListsTitle') });
-        hero.createEl('p', { text: t('empty.noListsSubtitle') });
-        const createBtn = hero.createEl('button', { text: t('sidebar.newList'), cls: 'todo-primary-button' });
-        createBtn.onclick = () => { void this.promptCreateList(api); };
+        const heading = hero.createEl('h3', { text: t('empty.noListsTitle') });
+        const subtitle = hero.createEl('p', { text: t('empty.noListsSubtitle') });
+        const lists = hero.createDiv();
+        const openList = (list: TodoList) => {
+            this.selectedListId = list.id;
+            void this.render();
+        };
+        renderListComposer(this, api, hero, list => {
+            heading.setText(t('sidebar.lists'));
+            subtitle.remove();
+            const item = lists.createEl('button', { cls: 'todo-list-menu-item', attr: { type: 'button', 'data-list-id': list.id } });
+            setIcon(item.createSpan({ cls: 'todo-list-menu-item-icon' }), 'list');
+            item.createSpan({ cls: 'todo-list-menu-item-label', text: list.displayName });
+            item.onclick = () => openList(list);
+        });
     }
 
     normalizeSelectedView(lists: TodoList[]) {
@@ -204,6 +223,8 @@ export class TodoView extends ItemView {
         this.renderSearchBar(api, selectorHost, main, lists);
         this.renderTaskSkeleton(main);
 
+        renderTaskComposer(this, api, app);
+
         if (this.selectedListId === COMPLETED_VIEW_ID) {
             await this.loadCompletedView(api, main, lists);
         } else if (this.selectedListId === PLANNED_VIEW_ID) {
@@ -230,6 +251,7 @@ export class TodoView extends ItemView {
         setIcon(chevron, 'chevron-down');
 
         const updateSelector = () => {
+            this.updateTaskComposer?.();
             selectorIcon.empty();
             if (isSmartViewId(this.selectedListId)) {
                 const completed = this.selectedListId === COMPLETED_VIEW_ID;
@@ -240,7 +262,7 @@ export class TodoView extends ItemView {
                 return;
             }
 
-            const list = this.getSelectedList(lists);
+            const list = this.getSelectedList(this.currentLists);
             setIcon(selectorIcon, 'list');
             label.setText(list?.displayName || t('common.tasks'));
             selector.setAttr('aria-label', t('sidebar.currentListAria', { listName: list?.displayName || t('common.tasks') }));
@@ -249,8 +271,9 @@ export class TodoView extends ItemView {
         updateSelector();
 
         const panel = wrapper.createDiv({ cls: 'todo-list-menu' });
-        panel.setAttr('role', 'menu');
+        panel.setAttr('role', 'region');
         panel.setAttr('aria-label', t('sidebar.switchViewAria'));
+        const itemsHost = panel.createDiv();
 
         const closeMenu = () => {
             wrapper.removeClass('is-open');
@@ -267,8 +290,8 @@ export class TodoView extends ItemView {
             updateSelector();
             renderMenuItems();
             const loader = viewId === COMPLETED_VIEW_ID
-                ? (token: number) => this.loadCompletedView(api, main, lists, token)
-                : (token: number) => this.loadPlannedView(api, main, lists, token);
+                ? (token: number) => this.loadCompletedView(api, main, this.currentLists, token)
+                : (token: number) => this.loadPlannedView(api, main, this.currentLists, token);
             void this.transitionToView(api, main, loader);
         };
 
@@ -285,14 +308,12 @@ export class TodoView extends ItemView {
         };
 
         const renderMenuItems = () => {
-            panel.empty();
+            itemsHost.empty();
 
-            const addViewItem = (id: string, name: string, glyph: string, secondary = false) => {
-                const item = panel.createEl('button', { cls: 'todo-list-menu-item todo-smart-view-item' });
+            const addViewItem = (id: string, name: string, glyph: string) => {
+                const item = itemsHost.createEl('button', { cls: 'todo-list-menu-item todo-smart-view-item' });
                 item.setAttr('type', 'button');
-                item.setAttr('role', 'menuitem');
                 item.setAttr('data-view-id', id);
-                if (secondary) item.addClass('todo-list-menu-secondary');
                 if (this.selectedListId === id) item.addClass('is-active');
                 const icon = item.createSpan({ cls: 'todo-list-menu-item-icon' });
                 setIcon(icon, this.selectedListId === id ? 'check' : glyph);
@@ -301,13 +322,12 @@ export class TodoView extends ItemView {
             };
             addViewItem(PLANNED_VIEW_ID, t('smartView.planned'), 'calendar-days');
 
-            panel.createDiv({ cls: 'todo-list-menu-separator' });
-            panel.createDiv({ text: t('sidebar.lists'), cls: 'todo-list-menu-section-label' });
+            itemsHost.createDiv({ cls: 'todo-list-menu-separator' });
+            itemsHost.createDiv({ text: t('sidebar.lists'), cls: 'todo-list-menu-section-label' });
 
-            lists.forEach((list) => {
-                const item = panel.createEl('button', { cls: 'todo-list-menu-item' });
+            this.currentLists.forEach((list) => {
+                const item = itemsHost.createEl('button', { cls: 'todo-list-menu-item' });
                 item.setAttr('type', 'button');
-                item.setAttr('role', 'menuitem');
                 item.setAttr('data-list-id', list.id);
                 if (list.id === this.selectedListId) item.addClass('is-active');
 
@@ -316,29 +336,25 @@ export class TodoView extends ItemView {
                 item.createSpan({ text: list.displayName, cls: 'todo-list-menu-item-label' });
                 item.onclick = () => switchToList(list);
             });
-
-            panel.createDiv({ cls: 'todo-list-menu-separator' });
-            const createItem = panel.createEl('button', { cls: 'todo-list-menu-item todo-list-menu-create' });
-            createItem.setAttr('type', 'button');
-            createItem.setAttr('role', 'menuitem');
-            const plusIcon = createItem.createSpan({ cls: 'todo-list-menu-item-icon' });
-            setIcon(plusIcon, 'plus');
-            createItem.createSpan({ text: t('sidebar.newList'), cls: 'todo-list-menu-item-label' });
-            createItem.onclick = () => {
-                closeMenu();
-                void this.promptCreateList(api);
-            };
-            panel.createDiv({ cls: 'todo-list-menu-separator' });
-            addViewItem(COMPLETED_VIEW_ID, t('smartView.completed'), 'check-check', true);
         };
 
         renderMenuItems();
+        panel.createDiv({ cls: 'todo-list-menu-separator' });
+        renderListComposer(this, api, panel, () => renderMenuItems());
+        panel.createDiv({ cls: 'todo-list-menu-separator' });
+        const completed = panel.createEl('button', { cls: 'todo-list-menu-item todo-smart-view-item todo-list-menu-secondary', attr: { type: 'button', 'data-view-id': COMPLETED_VIEW_ID } });
+        const completedIcon = completed.createSpan({ cls: 'todo-list-menu-item-icon' });
+        setIcon(completedIcon, 'check-check');
+        completed.createSpan({ cls: 'todo-list-menu-item-label', text: t('smartView.completed') });
+        completed.onclick = () => switchToSmartView(COMPLETED_VIEW_ID);
 
         selector.onclick = (event) => {
             event.stopPropagation();
             const nextOpen = !wrapper.hasClass('is-open');
             if (nextOpen) {
                 renderMenuItems();
+                completed.toggleClass('is-active', this.selectedListId === COMPLETED_VIEW_ID);
+                setIcon(completedIcon, this.selectedListId === COMPLETED_VIEW_ID ? 'check' : 'check-check');
                 const missing = this.currentLists.some((list) => !this.taskCache.has(list.id));
                 if (missing) void this.warmAllListCaches(api, this.currentLists);
             }
@@ -392,7 +408,7 @@ export class TodoView extends ItemView {
             clearBtn.removeClass('is-visible');
             host.removeClass('is-searching');
             input.blur();
-            void this.restoreFromSearch(api, main, lists);
+            void this.restoreFromSearch(api, main, this.currentLists);
         };
         this.searchToggleFn = () => {
             if (host.hasClass('is-searching')) close();
@@ -417,9 +433,9 @@ export class TodoView extends ItemView {
                 this.searchQuery = value;
                 clearBtn.toggleClass('is-visible', value.length > 0);
                 if (this.isSearchMode()) {
-                    void this.runSearch(api, main, lists);
+                    void this.runSearch(api, main, this.currentLists);
                 } else {
-                    void this.restoreFromSearch(api, main, lists);
+                    void this.restoreFromSearch(api, main, this.currentLists);
                 }
             }, 150);
         };
@@ -601,29 +617,23 @@ export class TodoView extends ItemView {
         return button;
     }
 
-    async promptCreateList(api: MsTodoApi) {
-        const displayName = await new Promise<string | null>((resolve) => {
-            new CreateListModal(this.app, resolve).open();
-        });
-        if (!displayName) return;
-        await this.createList(api, displayName);
-    }
-
-    async createList(api: MsTodoApi, displayName: string) {
+    async createList(api: MsTodoApi, displayName: string): Promise<TodoList | null> {
         const name = displayName.trim();
-        if (!name) return;
+        if (!name || name.length > 64 || !api.isCurrentSession()) return null;
 
         try {
             const list = await api.createTaskList(name);
-            this.selectedListId = list.id;
-            this.selectedTaskId = null;
-            this.showEarlier = false;
+            if (!api.isCurrentSession()) return null;
+            this.currentLists.push(list);
+            this.setTaskCache(list.id, [], true);
+            this.updateTaskComposer?.();
             new Notice(t('notices.listCreated'));
-            await this.render();
+            return list;
         } catch (error) {
-            if (!api.isCurrentSession()) return;
+            if (!api.isCurrentSession()) return null;
             new Notice(t('notices.createListFailed'));
             console.error(error);
+            return null;
         }
     }
 
@@ -769,6 +779,7 @@ export class TodoView extends ItemView {
             const previousSelection = this.selectedListId;
             this.currentLists = freshLists;
             this.normalizeSelectedView(freshLists);
+            this.updateTaskComposer?.();
             if (listsChanged || cacheChanged) this.scheduleCachePersist();
             if (this.selectedListId !== previousSelection) {
                 void this.render();

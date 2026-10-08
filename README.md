@@ -9,8 +9,10 @@ An unofficial plugin for [Obsidian](https://obsidian.md) that allows you to inte
 - **Plan-focused sidebar**: Open **Planned** to see unfinished tasks with due dates or enabled reminders, grouped into Today, Tomorrow and Later. Older plans are collapsed below.
 - **Task Management**:
     - ✅ **View Tasks**: Select and view tasks from any Microsoft To Do list, not only the default list.
-    - 🗂️ **Manage Lists**: Create custom lists and delete non-default lists from the sidebar.
-    - ➕ **Quick capture**: Add a task through the command palette or an assigned hotkey, with a target list and optional due date.
+    - 🗂️ **Manage Lists**: Create lists directly in the view selector: select **Create list**, type a name, and press Enter. The new list appears without switching away from your current view. Select it whenever you want to enter it.
+    - 🏠 **Default view**: Choose Planned or one of your own lists in **Settings → Simple Microsoft To Do → Default sidebar view**. Unavailable lists fall back to Planned.
+    - ➕ **Add tasks inline**: Type in the sidebar's bottom input and press Enter. Tasks go to the current list, or the default list when viewing Planned or Completed, without an automatic due date.
+    - ⌨️ **Quick capture**: Use the command palette or your assigned hotkey (hinted in the sidebar input) to open a separate capture window, even with the sidebar closed. Choose a target list and an optional due date.
     - ☑️ **Complete Tasks**: Click the checkbox to mark tasks as completed or reopen completed tasks.
     - 🗓️ **Due Dates & Importance**: Edit due dates and mark tasks as important from the task detail panel.
     - 📝 **Notes & Markdown export**: Edit task notes in Obsidian, and write all lists, tasks, notes, and checklist steps into an Obsidian note.
