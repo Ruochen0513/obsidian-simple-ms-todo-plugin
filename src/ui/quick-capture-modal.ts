@@ -72,6 +72,10 @@ export class QuickCaptureModal extends Modal {
 
     private async submit() {
         if (this.submitting) return;
+        if (!this.api.isCurrentSession()) {
+            this.close();
+            return;
+        }
         const title = this.titleInput.value.trim();
         if (!title) {
             this.titleInput.focus();
@@ -84,9 +88,10 @@ export class QuickCaptureModal extends Modal {
         this.confirmButton.disabled = true;
         this.confirmButton.setText(t('modal.quickCaptureAdding'));
 
+        let task: TodoTask | null = null;
+        const dueToday = this.todayToggle.checked;
         try {
-            let task: TodoTask = await this.api.createTask(list.id, title);
-            const dueToday = this.todayToggle.checked;
+            task = await this.api.createTask(list.id, title);
             if (dueToday) {
                 task = await this.api.updateTaskDueDate(list.id, task.id, toLocalDateKey(new Date()));
             }
@@ -95,6 +100,17 @@ export class QuickCaptureModal extends Modal {
             new Notice(t('notices.taskAddedTo', { listName: list.displayName }) + (dueToday ? t('notices.taskAddedDueTodaySuffix') : ''));
             this.close();
         } catch (error) {
+            if (!this.api.isCurrentSession()) {
+                this.close();
+                return;
+            }
+            if (task) {
+                this.plugin.getTodoView()?.handleExternalTaskCreated(task, list, false);
+                new Notice(t('notices.taskCreatedDueTodayFailed', { listName: list.displayName }));
+                console.error(error);
+                this.close();
+                return;
+            }
             this.submitting = false;
             this.confirmButton.disabled = false;
             this.confirmButton.setText(t('common.add'));

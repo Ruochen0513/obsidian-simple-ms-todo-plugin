@@ -72,7 +72,7 @@ export const en = {
         createListFailed: 'Failed to create list',
         listDeleted: 'List deleted',
         deleteListFailed: 'Failed to delete list',
-        taskCreatedDueTodayFailed: 'Task created, but setting it to today failed. Find it in the "Tasks" list.',
+        taskCreatedDueTodayFailed: 'Task created in "{listName}", but setting it to today failed.',
         addTodayTaskFailed: "Failed to add today's task",
         addTaskFailedRestored: 'Failed to add task; your input has been restored',
         updateTaskFailedReverted: 'Failed to update task; changes reverted',

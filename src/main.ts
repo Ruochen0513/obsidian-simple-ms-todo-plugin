@@ -11,6 +11,8 @@ export default class MsTodoPlugin extends Plugin {
     auth: AuthManager;
     pkceVerifier: string = '';
     taskCacheSnapshot: TaskCacheSnapshot | null = null;
+    sessionVersion = 0;
+    private settingsSave: Promise<void> = Promise.resolve();
 
     async onload() {
         await this.loadSettings();
@@ -28,9 +30,10 @@ export default class MsTodoPlugin extends Plugin {
         this.addSettingTab(new MsTodoSettingTab(this.app, this));
 
         if (this.settings.syncOnStartup && this.settings.markdownSyncEnabled && this.settings.accessToken) {
-            window.setTimeout(() => {
+            const timer = window.setTimeout(() => {
                 void this.syncTasksToMarkdown({ silent: true });
             }, 2000);
+            this.register(() => window.clearTimeout(timer));
         }
     }
 
@@ -71,9 +74,10 @@ export default class MsTodoPlugin extends Plugin {
 
     async login() {
         if (!CLIENT_ID.includes('Here')) {
+            const session = ++this.sessionVersion;
             this.pkceVerifier = this.auth.generateCodeVerifier();
             const url = await this.auth.getAuthUrl(this.pkceVerifier);
-            window.open(url);
+            if (session === this.sessionVersion) window.open(url);
         }
     }
 
@@ -83,24 +87,30 @@ export default class MsTodoPlugin extends Plugin {
             return;
         }
 
-        if (data.code) {
+        if (data.code && this.pkceVerifier) {
+            const session = this.sessionVersion;
+            const verifier = this.pkceVerifier;
+            this.pkceVerifier = '';
             try {
                 new Notice(t('notices.connecting'));
-                const tokens = await this.auth.exchangeCodeForToken(data.code, this.pkceVerifier);
-                await this.saveTokens(tokens);
+                const tokens = await this.auth.exchangeCodeForToken(data.code, verifier);
+                await this.saveTokens(tokens, session);
+                if (session !== this.sessionVersion) return;
                 new Notice(t('notices.connected'));
                 this.refreshView();
                 if (this.settings.syncAfterLogin && this.settings.markdownSyncEnabled) {
                     await this.syncTasksToMarkdown({ silent: true });
                 }
             } catch (error) {
+                if (session !== this.sessionVersion) return;
                 console.error(error);
                 new Notice(t('notices.tokenFailed'));
             }
         }
     }
 
-    async saveTokens(tokens: TokenResponse) {
+    async saveTokens(tokens: TokenResponse, session: number) {
+        if (session !== this.sessionVersion) return;
         this.settings.accessToken = tokens.access_token;
         this.settings.refreshToken = tokens.refresh_token || this.settings.refreshToken;
         this.settings.tokenExpiresAt = Date.now() + (tokens.expires_in * 1000);
@@ -108,13 +118,17 @@ export default class MsTodoPlugin extends Plugin {
     }
 
     async clearData() {
+        this.sessionVersion++;
+        this.pkceVerifier = '';
         this.settings = Object.assign({}, DEFAULT_SETTINGS);
         this.taskCacheSnapshot = null;
+        this.refreshView();
         await this.saveSettings();
     }
 
     onunload() {
         this.getTodoView()?.flushTaskCachePersist();
+        this.sessionVersion++;
     }
 
     refreshView() {
@@ -152,6 +166,7 @@ export default class MsTodoPlugin extends Plugin {
         }
 
         const defaultList = lists.find((list) => list.wellknownListName === 'defaultList') || lists[0];
+        if (!api.isCurrentSession()) return;
         const currentList = view ? view.getSelectedList(view.currentLists) : null;
         const preferredListId = currentList?.id || defaultList?.id;
         new QuickCaptureModal(this.app, this, api, lists, preferredListId).open();
@@ -199,7 +214,9 @@ export default class MsTodoPlugin extends Plugin {
     async saveSettings() {
         const payload: Record<string, unknown> = { ...this.settings };
         if (this.taskCacheSnapshot) payload.taskCacheSnapshot = this.taskCacheSnapshot;
-        await this.saveData(payload);
+        // Keep sign-out's cleared data after any save that was already in flight.
+        this.settingsSave = this.settingsSave.catch(() => {}).then(() => this.saveData(payload));
+        await this.settingsSave;
     }
 
     async activateView() {

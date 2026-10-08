@@ -69,13 +69,24 @@ export class MsTodoApi {
     plugin: MsTodoPlugin;
     auth: AuthManager;
     private refreshPromise: Promise<string> | null = null;
+    private readonly session: number;
 
     constructor(plugin: MsTodoPlugin) {
         this.plugin = plugin;
         this.auth = new AuthManager();
+        this.session = plugin.sessionVersion;
+    }
+
+    isCurrentSession(): boolean {
+        return this.session === this.plugin.sessionVersion && !!this.plugin.settings.accessToken;
+    }
+
+    assertCurrentSession() {
+        if (!this.isCurrentSession()) throw new Error(t('apiError.noSignInInfo'));
     }
 
     async getValidToken(): Promise<string> {
+        this.assertCurrentSession();
         const now = Date.now();
         if (this.plugin.settings.tokenExpiresAt - now < 5 * 60 * 1000) {
             if (this.plugin.settings.refreshToken) {
@@ -94,16 +105,19 @@ export class MsTodoApi {
         try {
             console.warn(t('apiError.tokenRefreshing'));
             const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
-            await this.plugin.saveTokens(newTokens);
+            this.assertCurrentSession();
+            await this.plugin.saveTokens(newTokens, this.session);
+            this.assertCurrentSession();
             return newTokens.access_token;
         } catch (error) {
-            new Notice(t('apiError.signInExpired'));
+            if (this.isCurrentSession()) new Notice(t('apiError.signInExpired'));
             throw error;
         }
     }
 
     async request<T>(url: string, method: string = 'GET', body?: Record<string, unknown>): Promise<T> {
         const token = await this.getValidToken();
+        this.assertCurrentSession();
         const response = await requestUrl({
             url,
             method,
@@ -114,6 +128,7 @@ export class MsTodoApi {
             body: body ? JSON.stringify(body) : undefined,
         });
 
+        this.assertCurrentSession();
         if (method === 'DELETE' || response.status === 204) {
             return undefined as unknown as T;
         }
@@ -228,6 +243,7 @@ export class MsTodoApi {
         const markdown = buildMarkdownDocument(listsWithTasks);
         const targetPath = normalizePath(this.plugin.settings.markdownSyncPath || 'Microsoft To Do.md');
         await this.ensureSyncFolderExists(targetPath);
+        this.assertCurrentSession();
         await this.plugin.app.vault.adapter.write(targetPath, markdown);
         const taskCount = listsWithTasks.reduce((sum, item) => sum + item.tasks.length, 0);
         return { path: targetPath, listCount: lists.length, taskCount };

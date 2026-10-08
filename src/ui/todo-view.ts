@@ -2,6 +2,7 @@ import { App, ItemView, Menu, Modal, Notice, setIcon, WorkspaceLeaf } from 'obsi
 import type MsTodoPlugin from '../main';
 import { MsTodoApi, ChecklistItem, TodoList, TodoTask } from '../api/ms-todo-api';
 import { t } from '../i18n';
+import { taskBodyText } from '../utils/task-body';
 
 export const VIEW_TYPE_TODO = 'ms-todo-view';
 const MY_DAY_VIEW_ID = '__my-day__';
@@ -54,10 +55,14 @@ export class TodoView extends ItemView {
     searchInputEl: HTMLInputElement | null = null;
     searchHostEl: HTMLElement | null = null;
     searchToggleFn: (() => void) | null = null;
+    private searchTimer: number | null = null;
+    private noteDrafts = new Map<string, string>();
+    private cacheSession: number;
 
     constructor(leaf: WorkspaceLeaf, plugin: MsTodoPlugin) {
         super(leaf);
         this.plugin = plugin;
+        this.cacheSession = plugin.sessionVersion;
     }
 
     getViewType() { return VIEW_TYPE_TODO; }
@@ -69,12 +74,14 @@ export class TodoView extends ItemView {
     }
 
     async onClose() {
+        this.clearSearchState();
         this.flushTaskCachePersist();
     }
 
     async render() {
-        this.viewTransitionToken++;
-        this.searchQuery = '';
+        this.cacheSession = this.plugin.sessionVersion;
+        this.clearSearchState();
+        const token = this.viewTransitionToken;
         this.searchInputEl = null;
         this.searchHostEl = null;
         this.searchToggleFn = null;
@@ -83,7 +90,15 @@ export class TodoView extends ItemView {
         container.addClass('ms-todo-container');
 
         if (!this.plugin.settings.accessToken) {
+            if (this.cachePersistTimer !== null) window.clearTimeout(this.cachePersistTimer);
+            this.cachePersistTimer = null;
             this.taskCache.clear();
+            this.noteDrafts.clear();
+            this.pendingTaskIds.clear();
+            this.recentlyMutatedTaskIds.clear();
+            this.selectedListId = MY_DAY_VIEW_ID;
+            this.selectedTaskId = null;
+            this.showCompleted = false;
             this.currentLists = [];
             this.currentTasks = [];
             this.taskListByTaskId.clear();
@@ -111,6 +126,7 @@ export class TodoView extends ItemView {
         try {
             const api = new MsTodoApi(this.plugin);
             const lists = await api.getTaskLists();
+            if (token !== this.viewTransitionToken || !api.isCurrentSession()) return;
 
             if (!lists || lists.length === 0) {
                 loading.remove();
@@ -124,6 +140,7 @@ export class TodoView extends ItemView {
             this.normalizeSelectedView(lists);
             await this.renderShell(api, container, lists);
         } catch (error) {
+            if (token !== this.viewTransitionToken) return;
             loading.empty();
             loading.addClass('todo-error');
             loading.createSpan({ text: t('notices.loadFailed') });
@@ -346,6 +363,9 @@ export class TodoView extends ItemView {
     }
 
     clearSearchState() {
+        this.viewTransitionToken++;
+        if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
+        this.searchTimer = null;
         this.searchQuery = '';
         if (this.searchInputEl) this.searchInputEl.value = '';
     }
@@ -372,13 +392,11 @@ export class TodoView extends ItemView {
             input.focus();
         };
         const close = () => {
-            const hadResults = this.isSearchMode();
-            input.value = '';
-            this.searchQuery = '';
+            this.clearSearchState();
             clearBtn.removeClass('is-visible');
             host.removeClass('is-searching');
             input.blur();
-            if (hadResults) void this.restoreFromSearch(api, main, lists);
+            void this.restoreFromSearch(api, main, lists);
         };
         this.searchToggleFn = () => {
             if (host.hasClass('is-searching')) close();
@@ -394,17 +412,17 @@ export class TodoView extends ItemView {
             close();
         });
 
-        let searchTimer: number | null = null;
         const applySearch = (value: string) => {
-            if (searchTimer !== null) window.clearTimeout(searchTimer);
-            searchTimer = window.setTimeout(() => {
-                searchTimer = null;
-                const hadResults = this.isSearchMode();
+            this.viewTransitionToken++;
+            if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
+            this.searchTimer = window.setTimeout(() => {
+                this.searchTimer = null;
+                if (!api.isCurrentSession() || host !== this.searchHostEl) return;
                 this.searchQuery = value;
                 clearBtn.toggleClass('is-visible', value.length > 0);
                 if (this.isSearchMode()) {
                     void this.runSearch(api, main, lists);
-                } else if (hadResults) {
+                } else {
                     void this.restoreFromSearch(api, main, lists);
                 }
             }, 150);
@@ -425,9 +443,18 @@ export class TodoView extends ItemView {
     }
 
     async runSearch(api: MsTodoApi, main: HTMLElement, lists: TodoList[]) {
+        const token = ++this.viewTransitionToken;
         const query = this.searchQuery.trim().toLowerCase();
-        await this.warmAllListCaches(api, lists);
-        if (this.searchQuery.trim().toLowerCase() !== query) return;
+        try {
+            await this.warmAllListCaches(api, lists);
+        } catch (error) {
+            if (api.isCurrentSession() && token === this.viewTransitionToken) {
+                new Notice(t('notices.loadViewFailed'));
+                console.error(error);
+            }
+            return;
+        }
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.searchQuery.trim().toLowerCase() !== query) return;
 
         this.taskListByTaskId.clear();
         const results: TodoTask[] = [];
@@ -452,6 +479,7 @@ export class TodoView extends ItemView {
         });
 
         this.currentTasks = results;
+        main.removeClass('is-list-leaving', 'is-list-loading', 'is-list-entering');
         main.empty();
         const listArea = main.createDiv({ cls: 'todo-task-list-area' });
         const detail = main.createDiv({ cls: 'todo-detail-panel' });
@@ -462,13 +490,22 @@ export class TodoView extends ItemView {
     }
 
     async restoreFromSearch(api: MsTodoApi, main: HTMLElement, lists: TodoList[]) {
-        if (this.selectedListId === OVERDUE_VIEW_ID) {
-            await this.loadOverdueView(api, main, lists);
-        } else if (this.selectedListId === MY_DAY_VIEW_ID) {
-            await this.loadMyDay(api, main, lists);
-        } else {
-            const list = this.getSelectedList(lists);
-            if (list) await this.loadTaskList(api, main, list);
+        const token = ++this.viewTransitionToken;
+        main.removeClass('is-list-leaving', 'is-list-loading', 'is-list-entering');
+        try {
+            if (this.selectedListId === OVERDUE_VIEW_ID) {
+                await this.loadOverdueView(api, main, lists, token);
+            } else if (this.selectedListId === MY_DAY_VIEW_ID) {
+                await this.loadMyDay(api, main, lists, token);
+            } else {
+                const list = this.getSelectedList(lists);
+                if (list) await this.loadTaskList(api, main, list, token);
+            }
+        } catch (error) {
+            if (api.isCurrentSession() && token === this.viewTransitionToken) {
+                new Notice(t('notices.loadViewFailed'));
+                console.error(error);
+            }
         }
     }
 
@@ -542,7 +579,6 @@ export class TodoView extends ItemView {
                 .setIcon('log-out')
                 .onClick(async () => {
                     await this.plugin.clearData();
-                    void this.render();
                 });
         });
 
@@ -589,6 +625,7 @@ export class TodoView extends ItemView {
             new Notice(t('notices.listCreated'));
             await this.render();
         } catch (error) {
+            if (!api.isCurrentSession()) return;
             new Notice(t('notices.createListFailed'));
             console.error(error);
         }
@@ -603,7 +640,7 @@ export class TodoView extends ItemView {
                 after: t('modal.deleteListAfter'),
             }, resolve).open();
         });
-        if (!confirmed) return;
+        if (!confirmed || !api.isCurrentSession()) return;
 
         try {
             await api.deleteTaskList(list.id);
@@ -617,6 +654,7 @@ export class TodoView extends ItemView {
             new Notice(t('notices.listDeleted'));
             await this.render();
         } catch (error) {
+            if (!api.isCurrentSession()) return;
             new Notice(t('notices.deleteListFailed'));
             console.error(error);
         }
@@ -661,6 +699,7 @@ export class TodoView extends ItemView {
     }
 
     scheduleCachePersist() {
+        if (!this.plugin.settings.accessToken) return;
         if (this.cachePersistTimer !== null) window.clearTimeout(this.cachePersistTimer);
         this.cachePersistTimer = window.setTimeout(() => {
             this.cachePersistTimer = null;
@@ -676,6 +715,7 @@ export class TodoView extends ItemView {
     }
 
     async persistTaskCache() {
+        if (!this.plugin.settings.accessToken || this.cacheSession !== this.plugin.sessionVersion) return;
         const entries: TaskCacheSnapshot['entries'] = {};
         this.taskCache.forEach((entry, listId) => {
             if (entry.tasks.length === 0 && !entry.allLoaded) return;
@@ -719,6 +759,7 @@ export class TodoView extends ItemView {
     async refreshListsInBackground(api: MsTodoApi) {
         try {
             const freshLists = await api.getTaskLists();
+            if (!api.isCurrentSession()) return;
             if (!freshLists || freshLists.length === 0) return;
 
             const freshIds = new Set(freshLists.map((list) => list.id));
@@ -761,12 +802,14 @@ export class TodoView extends ItemView {
     }
 
     async ensureAllTasksLoaded(api: MsTodoApi, listId: string): Promise<TodoTask[]> {
+        api.assertCurrentSession();
         const entry = this.taskCache.get(listId);
         if (entry?.allLoaded) return entry.tasks;
         if (entry?.loadingAll) return entry.loadingAll;
 
         const loading = api.getTasks(listId, true)
             .then((tasks) => {
+                api.assertCurrentSession();
                 const mergedTasks = this.mergeServerTasksWithLocal(listId, tasks);
                 this.taskCache.set(listId, {
                     tasks: mergedTasks,
@@ -778,7 +821,7 @@ export class TodoView extends ItemView {
             })
             .finally(() => {
                 const current = this.taskCache.get(listId);
-                if (current) current.loadingAll = undefined;
+                if (api.isCurrentSession() && current?.loadingAll === loading) current.loadingAll = undefined;
             });
 
         if (entry) entry.loadingAll = loading;
@@ -843,6 +886,7 @@ export class TodoView extends ItemView {
         if (missingLists.length === 0) return;
         await Promise.all(missingLists.map(async (list) => {
             const tasks = await api.getTasks(list.id, false);
+            api.assertCurrentSession();
             this.setTaskCache(list.id, tasks, false);
         }));
     }
@@ -869,9 +913,11 @@ export class TodoView extends ItemView {
     }
 
     async preloadCompletedData(api: MsTodoApi, list: TodoList | null) {
+        const token = this.viewTransitionToken;
         try {
             if (isSmartViewId(this.selectedListId)) {
                 await Promise.all(this.currentLists.map((item) => this.ensureAllTasksLoaded(api, item.id)));
+                if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
                 if (this.selectedListId === MY_DAY_VIEW_ID) {
                     this.currentTasks = this.collectMyDayTasks(this.currentLists);
                 } else if (this.selectedListId === OVERDUE_VIEW_ID) {
@@ -882,6 +928,7 @@ export class TodoView extends ItemView {
 
             if (!list) return;
             const tasks = await this.ensureAllTasksLoaded(api, list.id);
+            if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
             if (this.selectedListId === list.id) this.currentTasks = tasks;
         } catch (error) {
             console.warn('预加载已完成任务失败', error);
@@ -889,15 +936,17 @@ export class TodoView extends ItemView {
     }
 
     async refreshCachedList(api: MsTodoApi, list: TodoList, listArea: HTMLElement, detail: HTMLElement) {
+        const token = this.viewTransitionToken;
         const entry = this.taskCache.get(list.id);
         if (!entry || Date.now() - entry.updatedAt < TASK_CACHE_TTL_MS) return;
         if (this.pendingTaskIds.size > 0) return;
 
         try {
             const serverTasks = await api.getTasks(list.id, entry.allLoaded);
+            if (!api.isCurrentSession()) return;
             const tasks = this.mergeServerTasksWithLocal(list.id, serverTasks);
             this.setTaskCache(list.id, tasks, entry.allLoaded);
-            if (this.selectedListId === list.id) {
+            if (token === this.viewTransitionToken && !this.isSearchMode() && this.selectedListId === list.id) {
                 this.currentTasks = tasks;
                 this.renderTaskList(api, list, listArea, detail);
             }
@@ -963,11 +1012,11 @@ export class TodoView extends ItemView {
         if (this.selectedTaskId === tempId) this.selectedTaskId = null;
     }
 
-    async loadMyDay(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token?: number) {
+    async loadMyDay(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token = this.viewTransitionToken) {
         const today = toLocalDateKey(new Date());
         await this.warmAllListCaches(api, lists);
 
-        if (token !== undefined && token !== this.viewTransitionToken) return;
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken) return;
 
         this.currentTasks = this.collectMyDayTasks(lists);
         main.empty();
@@ -990,6 +1039,7 @@ export class TodoView extends ItemView {
             input.setAttr('aria-label', t('taskDetail.addTodayAria', { listName: defaultList.displayName }));
 
             const createTask = () => {
+                if (!api.isCurrentSession()) return;
                 const taskTitle = input.value.trim();
                 if (!taskTitle) return;
 
@@ -1010,10 +1060,11 @@ export class TodoView extends ItemView {
                         this.replaceTemporaryTask(optimisticTask.id, task, defaultList);
                         this.renderTaskList(api, defaultList, listArea, detail);
                     } catch (error) {
+                        if (!api.isCurrentSession()) return;
                         this.removeOptimisticTask(optimisticTask.id, defaultList.id);
                         if (created) {
                             this.upsertTaskInCache(defaultList.id, created);
-                            new Notice(t('notices.taskCreatedDueTodayFailed'));
+                            new Notice(t('notices.taskCreatedDueTodayFailed', { listName: defaultList.displayName }));
                         } else {
                             new Notice(t('notices.addTodayTaskFailed'));
                             if (!input.value) input.value = taskTitle;
@@ -1042,10 +1093,10 @@ export class TodoView extends ItemView {
         void this.refreshSmartViewInBackground(api, lists, MY_DAY_VIEW_ID, defaultList, listArea, detail);
     }
 
-    async loadOverdueView(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token?: number) {
+    async loadOverdueView(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token = this.viewTransitionToken) {
         await this.warmAllListCaches(api, lists);
 
-        if (token !== undefined && token !== this.viewTransitionToken) return;
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken) return;
 
         this.currentTasks = this.collectOverdueTasks(lists);
         main.empty();
@@ -1068,6 +1119,7 @@ export class TodoView extends ItemView {
         listArea: HTMLElement,
         detail: HTMLElement,
     ) {
+        const token = this.viewTransitionToken;
         const stale = lists.filter((list) => {
             const entry = this.taskCache.get(list.id);
             if (entry?.loadingAll) return false;
@@ -1081,6 +1133,7 @@ export class TodoView extends ItemView {
                 const entry = this.taskCache.get(list.id);
                 const includeCompleted = entry?.allLoaded ?? false;
                 const serverTasks = await api.getTasks(list.id, includeCompleted);
+                api.assertCurrentSession();
                 this.setTaskCache(list.id, this.mergeServerTasksWithLocal(list.id, serverTasks), includeCompleted);
             }));
         } catch (error) {
@@ -1088,14 +1141,14 @@ export class TodoView extends ItemView {
             return;
         }
 
-        if (this.selectedListId !== viewId) return;
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode() || this.selectedListId !== viewId) return;
         this.currentTasks = viewId === OVERDUE_VIEW_ID
             ? this.collectOverdueTasks(lists)
             : this.collectMyDayTasks(lists);
         this.renderTaskList(api, renderList, listArea, detail);
     }
 
-    async loadTaskList(api: MsTodoApi, main: HTMLElement, list: TodoList, token?: number) {
+    async loadTaskList(api: MsTodoApi, main: HTMLElement, list: TodoList, token = this.viewTransitionToken) {
         const cached = this.taskCache.get(list.id);
         let tasks: TodoTask[];
 
@@ -1103,10 +1156,11 @@ export class TodoView extends ItemView {
             tasks = cached.tasks;
         } else {
             tasks = await api.getTasks(list.id, false);
+            if (!api.isCurrentSession()) return;
             this.setTaskCache(list.id, tasks, false);
         }
 
-        if (token !== undefined && token !== this.viewTransitionToken) return;
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken) return;
 
         this.taskListByTaskId.clear();
         tasks.forEach((task) => this.taskListByTaskId.set(task.id, list));
@@ -1128,6 +1182,7 @@ export class TodoView extends ItemView {
         input.setAttr('aria-label', t('taskDetail.addTaskAria', { listName: list.displayName }));
 
         const createTask = () => {
+            if (!api.isCurrentSession()) return;
             const taskTitle = input.value.trim();
             if (!taskTitle) return;
 
@@ -1146,6 +1201,7 @@ export class TodoView extends ItemView {
                     this.replaceTemporaryTask(optimisticTask.id, task, list);
                     this.renderTaskList(api, list, listArea, detail);
                 } catch (error) {
+                    if (!api.isCurrentSession()) return;
                     this.removeOptimisticTask(optimisticTask.id, list.id);
                     if (!input.value) input.value = taskTitle;
                     this.renderTaskList(api, list, listArea, detail);
@@ -1179,7 +1235,7 @@ export class TodoView extends ItemView {
         detail: HTMLElement,
         task: TodoTask,
     ) {
-        if (this.pendingTaskIds.has(task.id)) return;
+        if (!api.isCurrentSession() || this.pendingTaskIds.has(task.id)) return;
 
         const originalTask: TodoTask = {
             ...task,
@@ -1212,6 +1268,7 @@ export class TodoView extends ItemView {
             this.replaceTask(updatedTask, list.id);
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
+            if (!api.isCurrentSession()) return;
             this.pendingTaskIds.delete(task.id);
             this.selectedTaskId = originalSelectedTaskId;
             this.replaceTask(originalTask, list.id);
@@ -1227,10 +1284,11 @@ export class TodoView extends ItemView {
         listArea: HTMLElement,
         detail: HTMLElement,
     ) {
+        const token = this.viewTransitionToken;
         try {
             if (isSmartViewId(this.selectedListId)) {
                 await Promise.all(this.currentLists.map((item) => this.ensureAllTasksLoaded(api, item.id)));
-                if (!isSmartViewId(this.selectedListId) || !this.showCompleted) return;
+                if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode() || !this.showCompleted) return;
                 this.currentTasks = this.selectedListId === OVERDUE_VIEW_ID
                     ? this.collectOverdueTasks(this.currentLists)
                     : this.collectMyDayTasks(this.currentLists);
@@ -1241,12 +1299,12 @@ export class TodoView extends ItemView {
             if (!list) return;
             const selectedId = this.selectedListId;
             const tasks = await this.ensureAllTasksLoaded(api, list.id);
-            if (this.selectedListId !== selectedId || !this.showCompleted) return;
+            if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode() || this.selectedListId !== selectedId || !this.showCompleted) return;
             this.currentTasks = tasks;
             tasks.forEach((task) => this.taskListByTaskId.set(task.id, list));
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
-            if (this.showCompleted) {
+            if (api.isCurrentSession() && token === this.viewTransitionToken && this.showCompleted) {
                 new Notice(t('notices.loadCompletedFailed'));
                 this.renderTaskList(api, list, listArea, detail);
             }
@@ -1255,6 +1313,7 @@ export class TodoView extends ItemView {
     }
 
     renderTaskList(api: MsTodoApi, list: TodoList | null, listArea: HTMLElement, detail: HTMLElement) {
+        if (!api.isCurrentSession() || listArea !== this.mainListArea || detail !== this.mainDetail) return;
         listArea.empty();
         detail.empty();
         detail.removeClass('is-open');
@@ -1374,7 +1433,7 @@ export class TodoView extends ItemView {
             }
         }
 
-        const body = stripHtml(task.body?.content || '').trim();
+        const body = taskBodyText(task.body).trim();
         if (body) content.createSpan({ text: body, cls: 'todo-task-preview' });
 
         if (task.checklistItems && task.checklistItems.length > 0) {
@@ -1501,11 +1560,13 @@ export class TodoView extends ItemView {
             failMessage: string,
             afterSuccess?: () => void,
         ) => {
+            if (!api.isCurrentSession()) return;
             applyLocal();
             this.renderTaskList(api, list, listArea, detail);
             void (async () => {
                 try {
                     await op();
+                    if (!api.isCurrentSession()) return;
                     this.markTaskRecentlyMutated(task.id);
                     this.scheduleCachePersist();
                     if (afterSuccess) {
@@ -1514,6 +1575,7 @@ export class TodoView extends ItemView {
                         refocusStepInput();
                     }
                 } catch (error) {
+                    if (!api.isCurrentSession()) return;
                     rollback();
                     this.renderTaskList(api, list, listArea, detail);
                     new Notice(failMessage);
@@ -1673,17 +1735,25 @@ export class TodoView extends ItemView {
         setIcon(noteLabelIcon, 'notebook-pen');
         noteLabel.createSpan({ text: t('taskDetail.notesLabel') });
         const noteInput = noteCard.createEl('textarea', { cls: 'todo-note-input', placeholder: t('taskDetail.notePlaceholder') });
-        noteInput.value = stripHtml(task.body?.content || '');
+        noteInput.value = this.noteDrafts.get(task.id) ?? taskBodyText(task.body);
+        noteInput.addEventListener('input', () => {
+            this.noteDrafts.set(task.id, noteInput.value);
+        });
         noteInput.rows = 8;
         const saveNote = noteCard.createEl('button', { text: t('taskDetail.saveNote'), cls: 'todo-primary-button todo-save-note' });
         saveNote.onclick = () => {
+            const content = noteInput.value;
             void this.saveTaskChange(
                 api,
                 list,
                 listArea,
                 detail,
                 task,
-                () => api.updateTaskBody(list.id, task.id, noteInput.value),
+                async () => {
+                    const updated = await api.updateTaskBody(list.id, task.id, content);
+                    if (api.isCurrentSession() && this.noteDrafts.get(task.id) === content) this.noteDrafts.delete(task.id);
+                    return updated;
+                },
                 t('taskDetail.noteUpdated'),
             );
         };
@@ -1711,7 +1781,7 @@ export class TodoView extends ItemView {
         detail: HTMLElement,
         task: TodoTask,
     ) {
-        if (this.pendingTaskIds.has(task.id)) return;
+        if (!api.isCurrentSession() || this.pendingTaskIds.has(task.id)) return;
 
         const confirmed = await new Promise<boolean>((resolve) => {
             new DeleteConfirmModal(this.app, {
@@ -1721,7 +1791,7 @@ export class TodoView extends ItemView {
                 after: t('modal.deleteTaskAfter'),
             }, resolve).open();
         });
-        if (!confirmed) return;
+        if (!confirmed || !api.isCurrentSession()) return;
 
         const previousCurrentTasks = [...this.currentTasks];
         const previousSelectedTaskId = this.selectedTaskId;
@@ -1739,11 +1809,13 @@ export class TodoView extends ItemView {
 
         try {
             await api.deleteTask(list.id, task.id);
+            this.noteDrafts.delete(task.id);
             this.pendingTaskIds.delete(task.id);
             this.removeTaskFromCache(list.id, task.id);
             this.taskListByTaskId.delete(task.id);
             new Notice(t('notices.taskDeleted'));
         } catch (error) {
+            if (!api.isCurrentSession()) return;
             this.pendingTaskIds.delete(task.id);
             this.currentTasks = previousCurrentTasks;
             this.selectedTaskId = previousSelectedTaskId;
@@ -1769,14 +1841,17 @@ export class TodoView extends ItemView {
         update: () => Promise<TodoTask>,
         successMessage: string,
     ) {
+        if (!api.isCurrentSession()) return;
         try {
             const updatedTask = await update();
+            if (!api.isCurrentSession()) return;
             this.markTaskRecentlyMutated(updatedTask.id || task.id);
             this.replaceTask(updatedTask, list.id);
             this.selectedTaskId = updatedTask.id || task.id;
             new Notice(successMessage);
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
+            if (!api.isCurrentSession()) return;
             new Notice(t('notices.updateTaskFailed'));
             console.error(error);
         }
@@ -1994,17 +2069,4 @@ function formatDisplayDate(value: string): string {
     const parts = date.split('-');
     if (parts.length !== 3) return date;
     return t('date.fullFormat', { y: parts[0], m: parts[1], d: parts[2] });
-}
-
-function stripHtml(value: string): string {
-    return value
-        .replace(/<br\s*\/?\s*>/gi, '\n')
-        .replace(/<\/p>\s*<p>/gi, '\n\n')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
 }

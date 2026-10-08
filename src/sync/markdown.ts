@@ -1,5 +1,6 @@
 import type { TodoList, TodoTask } from '../api/ms-todo-api';
 import { t } from '../i18n';
+import { taskBodyText } from '../utils/task-body';
 
 interface ListWithTasks {
     list: TodoList;
@@ -34,10 +35,11 @@ function appendTask(lines: string[], task: TodoTask) {
     const metadata = buildMetadata(task);
     lines.push(`- [${checked}] ${escapeMarkdown(task.title)}${metadata ? ` ${metadata}` : ''}`);
 
-    const body = htmlToMarkdown(task.body?.content || '').trim();
+    const body = taskBodyText(task.body).trim();
     if (body) {
         body.split('\n').forEach((line) => {
-            lines.push(`  > ${line || ' '}`);
+            const escaped = line.replace(/&/g, '&amp;').replace(/[\\`*_{}\[\]()#+.!|<>~=-]/g, '\\$&');
+            lines.push(`  > ${escaped || ' '}`);
         });
     }
 
@@ -69,30 +71,6 @@ function buildMetadata(task: TodoTask): string {
 
 function formatDate(value: string): string {
     return value.includes('T') ? (value.split('T')[0] || value) : value;
-}
-
-function htmlToMarkdown(value: string): string {
-    return value
-        .replace(/<br\s*\/?\s*>/gi, '\n')
-        .replace(/<\/p>\s*<p>/gi, '\n\n')
-        .replace(/<\/div>\s*<div>/gi, '\n')
-        .replace(/<\/?p[^>]*>/gi, '')
-        .replace(/<\/?div[^>]*>/gi, '')
-        .replace(/<li[^>]*>/gi, '- ')
-        .replace(/<\/li>/gi, '\n')
-        .replace(/<\/?ul[^>]*>/gi, '')
-        .replace(/<\/?ol[^>]*>/gi, '')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .split('\n')
-        .map(line => line.trimEnd())
-        .join('\n')
-        .trim();
 }
 
 function escapeMarkdown(value: string): string {

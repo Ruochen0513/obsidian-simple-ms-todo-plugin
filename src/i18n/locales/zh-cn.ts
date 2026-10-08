@@ -59,7 +59,7 @@ export const zhCn: Record<TranslationKey, string> = {
     'notices.createListFailed': '创建清单失败',
     'notices.listDeleted': '清单已删除',
     'notices.deleteListFailed': '删除清单失败',
-    'notices.taskCreatedDueTodayFailed': '任务已创建，但设置为今天失败，可在“任务”清单中找到',
+    'notices.taskCreatedDueTodayFailed': '任务已创建到「{listName}」，但设置为今天到期失败',
     'notices.addTodayTaskFailed': '添加今天的任务失败',
     'notices.addTaskFailedRestored': '添加任务失败，已恢复输入内容',
     'notices.updateTaskFailedReverted': '更新任务失败，已恢复原状态',
