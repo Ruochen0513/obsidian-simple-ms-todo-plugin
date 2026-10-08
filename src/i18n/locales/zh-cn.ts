@@ -89,6 +89,11 @@ export const zhCn: Record<TranslationKey, string> = {
     'taskRow.syncingAria': '正在同步',
 
     'taskDetail.backAria': '返回任务列表',
+    'calendar.chooseDate': '选择日期',
+    'calendar.previousMonth': '上个月',
+    'calendar.nextMonth': '下个月',
+    'calendar.clear': '清除',
+    'calendar.year': '年份',
     'taskDetail.taskName': '任务名称',
     'taskDetail.titleUpdated': '已更新任务名称',
     'taskDetail.removeImportantAria': '取消重要标记',

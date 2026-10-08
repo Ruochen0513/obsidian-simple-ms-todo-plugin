@@ -87,6 +87,11 @@ export const en = {
     'taskRow.syncingAria': 'Syncing',
 
     'taskDetail.backAria': 'Back to tasks',
+    'calendar.chooseDate': 'Choose date',
+    'calendar.previousMonth': 'Previous month',
+    'calendar.nextMonth': 'Next month',
+    'calendar.clear': 'Clear',
+    'calendar.year': 'Year',
     'taskDetail.taskName': 'Task name',
     'taskDetail.titleUpdated': 'Title updated',
     'taskDetail.removeImportantAria': 'Remove importance',

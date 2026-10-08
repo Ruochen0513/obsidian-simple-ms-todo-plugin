@@ -9,6 +9,7 @@ const source = buildSync({
             export { TodoView } from './src/ui/todo-view';
             export { MsTodoApi } from './src/api/ms-todo-api';
             export { QuickCaptureModal } from './src/ui/quick-capture-modal';
+            export { attachDatePicker } from './src/ui/date-picker';
             export { buildMarkdownDocument } from './src/sync/markdown';
             export { DEFAULT_SETTINGS } from './src/settings';
             export { readSettings } from './src/settings';
@@ -22,7 +23,7 @@ const source = buildSync({
         resolveDir: path.resolve(__dirname, '..'),
         loader: 'ts',
     },
-    bundle: true, platform: 'node', format: 'cjs', external: ['obsidian'], write: false,
+    bundle: true, platform: 'node', format: 'cjs', external: ['obsidian', 'flatpickr', 'flatpickr/dist/l10n/zh'], write: false,
 }).outputFiles[0].text;
 
 class Element {
@@ -33,6 +34,7 @@ class Element {
         this.listeners = {};
         this.value = '';
         this.text = options.text || '';
+        this.ownerDocument = { body: {} };
     }
     createEl(tag, options) {
         const child = new Element(options);
@@ -55,6 +57,7 @@ class Element {
     emit(name, event = {}) { return this.listeners[name]?.(event); }
     focus() {}
     blur() {}
+    closest() { return null; }
     querySelectorAll(selector) {
         return this.children.flatMap(child => [
             ...(child.hasClass(selector.slice(1)) ? [child] : []),
@@ -86,10 +89,34 @@ function setup(options = {}) {
     let nextTimer = 0;
     const network = { request: async () => { throw new Error('Unexpected request'); } };
     class Component {
-        register() {}
+        children = [];
+        cleanups = [];
+        register(callback) { this.cleanups.push(callback); }
         registerDomEvent() {}
+        addChild(child) { this.children.push(child); return child; }
+        removeChild(child) { this.children = this.children.filter(item => item !== child); child.unload(); return child; }
+        unload() { this.children.forEach(child => child.unload()); this.cleanups.splice(0).forEach(callback => callback()); }
     }
+    class Scope {
+        handlers = [];
+        register(_modifiers, key, callback) { this.handlers.push({ key, callback }); }
+    }
+    const pickers = [];
+    const flatpickr = (input, config) => {
+        const picker = {
+            config, input, calendarContainer: new Element(), prevMonthNav: new Element(), nextMonthNav: new Element(), currentYearElement: new Element(),
+            isOpen: false, destroyed: false,
+            open() { this.isOpen = true; config.onOpen(); },
+            close() { this.isOpen = false; config.onClose(); },
+            destroy() { this.destroyed = true; },
+            clear() { input.value = ''; input.onchange?.(); },
+            setDate(date) { input.value = date.toISOString().slice(0, 10); input.onchange?.(); },
+        };
+        pickers.push(picker);
+        return picker;
+    };
     const obsidian = {
+        Component, Scope,
         Plugin: class extends Component {
             commands = new Map();
             async loadData() { return options.data || {}; }
@@ -98,7 +125,7 @@ function setup(options = {}) {
             removeCommand(id) { this.commands.delete(id); }
         },
         ItemView: class extends Component { constructor() { super(); this.contentEl = new Element(); } },
-        Modal: class { close() { this.closed = true; } },
+        Modal: class { constructor(app) { this.app = app; this.scope = new Scope(); } close() { this.closed = true; this.onClose?.(); } },
         PluginSettingTab: class {}, AbstractInputSuggest: class {},
         Notice: class { constructor(message) { notices.push(message); } },
         getLanguage: () => host.language, setIcon() {}, normalizePath: value => value,
@@ -106,7 +133,12 @@ function setup(options = {}) {
     };
     const context = {
         module: { exports: {} },
-        require: name => { if (name !== 'obsidian') throw new Error(name); return obsidian; },
+        require: name => {
+            if (name === 'obsidian') return obsidian;
+            if (name === 'flatpickr') return flatpickr;
+            if (name === 'flatpickr/dist/l10n/zh') return { Mandarin: {} };
+            throw new Error(name);
+        },
         console: { warn() {}, error() {} },
         window: {
             open() {},
@@ -119,7 +151,9 @@ function setup(options = {}) {
     const exports = context.module.exports;
     const plugin = new exports.MsTodoPlugin();
     plugin.settings = { ...exports.DEFAULT_SETTINGS };
-    plugin.app = { workspace: { getLeavesOfType: () => leaves }, secretStorage: storage };
+    const scopes = [];
+    plugin.app = { workspace: { getLeavesOfType: () => leaves }, secretStorage: storage,
+        keymap: { pushScope: scope => scopes.push(scope), popScope: scope => scopes.splice(scopes.indexOf(scope), 1) } };
     plugin.session = new exports.AuthSession(storage);
     if (options.signedIn !== false) plugin.session.restore('test-refresh');
     plugin.session.oauth.generateCodeVerifier = () => 'test-verifier';
@@ -134,7 +168,7 @@ function setup(options = {}) {
     view.mainListArea = new Element();
     view.mainDetail = new Element();
     const api = new exports.MsTodoApi(plugin);
-    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host };
+    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host, pickers, scopes };
 }
 
 module.exports = { setup, deferred, Element, list, task };

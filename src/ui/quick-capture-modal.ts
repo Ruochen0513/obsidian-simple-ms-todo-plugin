@@ -3,6 +3,7 @@ import type MsTodoPlugin from '../main';
 import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
 import { formatShortDate } from '../utils/task-dates';
 import { t } from '../i18n';
+import { attachDatePicker } from './date-picker';
 
 export class QuickCaptureModal extends Modal {
     private plugin: MsTodoPlugin;
@@ -15,6 +16,7 @@ export class QuickCaptureModal extends Modal {
     private dueDateInput!: HTMLInputElement;
     private confirmButton!: HTMLButtonElement;
     private submitting = false;
+    private disposeDatePicker?: () => void;
 
     constructor(app: App, plugin: MsTodoPlugin, api: MsTodoApi, lists: TodoList[], preferredListId?: string) {
         super(app);
@@ -59,6 +61,7 @@ export class QuickCaptureModal extends Modal {
         dateField.createSpan({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureDueDate') });
         this.dueDateInput = dateField.createEl('input', { type: 'date', cls: 'todo-quick-capture-date' });
         this.dueDateInput.setAttr('aria-label', t('modal.quickCaptureDueDate'));
+        this.disposeDatePicker = attachDatePicker(this.app, this.plugin, this.dueDateInput, this.scope);
         this.contentEl.createDiv({ cls: 'todo-quick-capture-hint', text: t('modal.quickCaptureDateHint') });
 
         const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
@@ -71,6 +74,11 @@ export class QuickCaptureModal extends Modal {
         this.confirmButton.onclick = () => { void this.submit(); };
 
         window.setTimeout(() => this.titleInput.focus(), 0);
+    }
+
+    onClose() {
+        this.disposeDatePicker?.();
+        this.disposeDatePicker = undefined;
     }
 
     private async submit() {

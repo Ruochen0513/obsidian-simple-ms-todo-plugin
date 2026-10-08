@@ -43,6 +43,7 @@ export class TodoView extends ItemView {
     searchToggleFn: (() => void) | null = null;
     private searchTimer: number | null = null;
     private noteDrafts = new Map<string, string>();
+    disposeDetailDatePicker?: () => void;
     private cacheSession: number;
 
     constructor(leaf: WorkspaceLeaf, plugin: MsTodoPlugin) {
@@ -60,11 +61,13 @@ export class TodoView extends ItemView {
     }
 
     async onClose() {
+        this.clearDetailDatePicker();
         this.clearSearchState();
         this.flushTaskCachePersist();
     }
 
     async render() {
+        this.clearDetailDatePicker();
         const accountChanged = this.cacheSession !== this.plugin.session.version;
         this.cacheSession = this.plugin.session.version;
         this.clearSearchState();
@@ -1015,6 +1018,7 @@ export class TodoView extends ItemView {
 
     renderTaskList(api: MsTodoApi, list: TodoList | null, listArea: HTMLElement, detail: HTMLElement) {
         if (!api.isCurrentSession() || listArea !== this.mainListArea || detail !== this.mainDetail) return;
+        this.clearDetailDatePicker();
         listArea.empty();
         detail.empty();
         detail.removeClass('is-open');
@@ -1146,6 +1150,11 @@ export class TodoView extends ItemView {
             if (this.pendingTaskIds.has(task.id)) return;
             this.selectTask(api, list, listArea, detail, task);
         };
+    }
+
+    clearDetailDatePicker() {
+        this.disposeDetailDatePicker?.();
+        this.disposeDetailDatePicker = undefined;
     }
 
     selectTask(api: MsTodoApi, list: TodoList, listArea: HTMLElement, detail: HTMLElement, task: TodoTask) {

@@ -1405,6 +1405,130 @@ body.theme-dark .todo-signed-out {
     min-width: 0;
 }
 
+/* Calendar styles are scoped so other plugins can use their own Flatpickr theme. */
+.flatpickr-calendar.todo-calendar {
+    display: none;
+    position: absolute;
+    z-index: var(--layer-tooltip, 1000);
+    width: 280px;
+    max-width: calc(100vw - 16px);
+    padding: 10px;
+    box-sizing: border-box;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    box-shadow: var(--shadow-s);
+    font-family: var(--font-interface);
+    font-size: 13px;
+    line-height: 1.4;
+    visibility: visible;
+    opacity: 1;
+    animation: none;
+}
+
+.flatpickr-calendar.todo-calendar.open { display: block; }
+.todo-calendar::before, .todo-calendar::after { display: none; }
+.todo-calendar .flatpickr-months {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.todo-calendar .flatpickr-current-month {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 32px;
+    font-weight: 600;
+}
+.todo-calendar .numInputWrapper { display: inline-flex; }
+.todo-calendar.is-chinese .numInputWrapper { order: -1; align-items: center; }
+.todo-calendar.is-chinese .numInputWrapper::after { content: '年'; }
+.todo-calendar .numInputWrapper > span { display: none; }
+.todo-calendar input.cur-year {
+    width: 5.2ch;
+    height: 28px;
+    padding: 3px;
+    border: 0;
+    background: transparent;
+    color: var(--text-normal);
+    box-shadow: none !important;
+    font: inherit;
+    appearance: textfield;
+}
+.todo-calendar input.cur-year::-webkit-inner-spin-button { display: none; }
+.todo-calendar .flatpickr-prev-month,
+.todo-calendar .flatpickr-next-month {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    border-radius: 5px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.todo-calendar .flatpickr-months svg { width: 16px; height: 16px; }
+.todo-calendar .flatpickr-weekdaycontainer,
+.todo-calendar .dayContainer {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.todo-calendar .flatpickr-weekday {
+    padding: 5px 0;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 11px;
+    font-weight: 400;
+}
+.todo-calendar .flatpickr-day {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 34px;
+    margin: 1px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-normal);
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+}
+.todo-calendar .flatpickr-day:is(.prevMonthDay, .nextMonthDay) { color: var(--text-faint); }
+.todo-calendar .flatpickr-day.today { border-color: var(--interactive-accent); }
+.todo-calendar .flatpickr-day.selected {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+.todo-calendar .flatpickr-day:not(.selected):hover,
+.todo-calendar :is(.flatpickr-prev-month, .flatpickr-next-month):hover,
+.todo-calendar-footer button:hover { background: var(--background-modifier-hover); }
+.todo-calendar :is(.flatpickr-day, [role="button"], button):focus-visible {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: -2px;
+}
+.todo-calendar-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+.todo-calendar-footer button {
+    height: 28px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 5px;
+    box-shadow: none !important;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+}
+.todo-calendar-footer button:last-child { color: var(--interactive-accent); }
+input.todo-calendar-input { cursor: pointer; }
+.todo-quick-capture-date { width: 100%; min-width: 0; }
+
 .todo-quick-capture-hint {
     margin-bottom: 16px;
     color: var(--text-muted);

@@ -4,8 +4,10 @@ import type { MsTodoApi, TodoList, TodoTask, ChecklistItem } from '../api/ms-tod
 import { t } from '../i18n';
 import { taskBodyText } from '../utils/task-body';
 import { dateToInputValue, toLocalDateKey, formatDisplayDate } from '../utils/task-dates';
+import { attachDatePicker } from './date-picker';
 
 export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLElement, listArea: HTMLElement, list: TodoList, task: TodoTask, noteDrafts: Map<string, string>) {
+    view.clearDetailDatePicker();
     detail.empty();
     detail.addClass('is-open');
 
@@ -17,6 +19,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     closeBtn.createSpan({ text: t('taskDetail.backAria'), cls: 'todo-detail-topbar-title' });
 
     closeBtn.onclick = () => {
+        view.clearDetailDatePicker();
         view.selectedTaskId = null;
         detail.empty();
         detail.removeClass('is-open');
@@ -253,6 +256,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
             dateInput.value ? t('taskDetail.dueDateUpdated') : t('taskDetail.dueDateCleared'),
         );
     };
+    view.disposeDetailDatePicker = attachDatePicker(view.plugin.app, view, dateInput, view.scope);
     if (task.dueDateTime?.dateTime) {
         const clearDate = dateControl.createEl('button', { cls: 'todo-clear-date' });
         clearDate.setAttr('type', 'button');
