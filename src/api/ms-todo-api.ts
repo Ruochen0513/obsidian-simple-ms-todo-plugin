@@ -1,6 +1,7 @@
 import { normalizePath, requestUrl } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { buildMarkdownDocument } from '../sync/markdown';
+import { applyChecklistOrder } from '../utils/checklist-order';
 
 const GRAPH_ENDPOINT = 'https://graph.microsoft.com/v1.0';
 
@@ -122,7 +123,9 @@ export class MsTodoApi {
     async getTasks(listId: string, includeCompleted: boolean = false): Promise<TodoTask[]> {
         const filter = includeCompleted ? '' : '&$filter=status ne \'completed\'';
         const url = `${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems,linkedResources${filter}`;
-        return this.getCollection<TodoTask>(url);
+        const tasks = await this.getCollection<TodoTask>(url);
+        tasks.forEach(task => applyChecklistOrder(task, listId, this.plugin.checklistOrders));
+        return tasks;
     }
 
     async createTaskList(displayName: string): Promise<TodoList> {

@@ -6,11 +6,13 @@ import { isValidTaskCacheSnapshot, type TaskCacheSnapshot } from './sync/task-ca
 import { MsTodoSettingTab } from './ui/settings-tab';
 import { TodoView, VIEW_TYPE_TODO } from './ui/todo-view';
 import { setLocale, t, type LocalePreference } from './i18n';
+import { readChecklistOrders, type ChecklistOrders } from './utils/checklist-order';
 
 export default class MsTodoPlugin extends Plugin {
     settings: MsTodoSettings;
     session: AuthSession;
     taskCacheSnapshot: TaskCacheSnapshot | null = null;
+    checklistOrders: ChecklistOrders = {};
     private settingsSave: Promise<void> = Promise.resolve();
 
     async onload() {
@@ -54,6 +56,9 @@ export default class MsTodoPlugin extends Plugin {
             const connected = await this.session.completeLogin(data.code);
             if (!connected) return;
             this.taskCacheSnapshot = null;
+            this.checklistOrders = {};
+            await this.saveSettings();
+            if (!this.session.isCurrent(version)) return;
             new Notice(t('notices.connected'));
             this.refreshView();
             if (this.settings.syncAfterLogin && this.settings.markdownSyncEnabled) {
@@ -72,6 +77,7 @@ export default class MsTodoPlugin extends Plugin {
             return;
         }
         this.taskCacheSnapshot = null;
+        this.checklistOrders = {};
         this.refreshView();
         await this.saveSettings();
     }
@@ -91,13 +97,17 @@ export default class MsTodoPlugin extends Plugin {
         this.settings = readSettings(data);
         setLocale(this.settings.locale);
         this.taskCacheSnapshot = isValidTaskCacheSnapshot(data.taskCacheSnapshot) ? data.taskCacheSnapshot : null;
+        this.checklistOrders = readChecklistOrders(data.checklistOrders);
         try {
             this.session.restore(data.refreshToken);
         } catch {
             new Notice(t('account.storageFailed'));
             throw new Error(t('account.storageFailed'));
         }
-        if (!this.session.signedIn) this.taskCacheSnapshot = null;
+        if (!this.session.signedIn) {
+            this.taskCacheSnapshot = null;
+            this.checklistOrders = {};
+        }
         if ('accessToken' in data || 'refreshToken' in data || 'tokenExpiresAt' in data) {
             await this.saveSettings();
         }
@@ -106,6 +116,7 @@ export default class MsTodoPlugin extends Plugin {
     async saveSettings() {
         const payload: Record<string, unknown> = { ...readSettings(this.settings) };
         if (this.taskCacheSnapshot) payload.taskCacheSnapshot = this.taskCacheSnapshot;
+        payload.checklistOrders = { ...this.checklistOrders };
         // Keep sign-out's cleared data after any save that was already in flight.
         this.settingsSave = this.settingsSave.catch(() => {}).then(() => this.saveData(payload));
         await this.settingsSave;

@@ -9,6 +9,7 @@ import { getPlannedDate, isPlannedTask, groupPlannedTasks } from '../utils/plann
 import type { TaskCacheEntry, TaskCacheSnapshot } from '../sync/task-cache';
 import { DeleteConfirmModal, CreateListModal } from './task-modals';
 import { renderTaskDetail } from './task-detail';
+import { checklistOrderKey } from '../utils/checklist-order';
 
 export const VIEW_TYPE_TODO = 'ms-todo-view';
 const PLANNED_VIEW_ID = '__planned__';
@@ -43,6 +44,9 @@ export class TodoView extends ItemView {
     searchToggleFn: (() => void) | null = null;
     private searchTimer: number | null = null;
     private noteDrafts = new Map<string, string>();
+    stepDrafts = new Map<string, string>();
+    pendingChecklistOrderTaskIds = new Set<string>();
+    disposeDetailSteps?: () => void;
     disposeDetailDatePicker?: () => void;
     private cacheSession: number;
 
@@ -61,13 +65,13 @@ export class TodoView extends ItemView {
     }
 
     async onClose() {
-        this.clearDetailDatePicker();
+        this.clearDetailControls();
         this.clearSearchState();
         this.flushTaskCachePersist();
     }
 
     async render() {
-        this.clearDetailDatePicker();
+        this.clearDetailControls();
         const accountChanged = this.cacheSession !== this.plugin.session.version;
         this.cacheSession = this.plugin.session.version;
         this.clearSearchState();
@@ -84,6 +88,8 @@ export class TodoView extends ItemView {
             this.cachePersistTimer = null;
             this.taskCache.clear();
             this.noteDrafts.clear();
+            this.stepDrafts.clear();
+            this.pendingChecklistOrderTaskIds.clear();
             this.pendingTaskIds.clear();
             this.pendingChecklistItemIds.clear();
             this.recentlyMutatedTaskIds.clear();
@@ -778,7 +784,9 @@ export class TodoView extends ItemView {
     mergeServerTasksWithLocal(listId: string, serverTasks: TodoTask[]): TodoTask[] {
         const current = this.taskCache.get(listId)?.tasks || [];
         const protectedLocal = current.filter((task) =>
-            this.pendingTaskIds.has(task.id) || this.recentlyMutatedTaskIds.has(task.id),
+            this.pendingTaskIds.has(task.id) || this.recentlyMutatedTaskIds.has(task.id)
+            || this.pendingChecklistOrderTaskIds.has(checklistOrderKey(listId, task.id))
+            || [...this.pendingChecklistItemIds].some(key => key.startsWith(`${task.id}:`)),
         );
         const protectedIds = new Set(protectedLocal.map((task) => task.id));
         return [
@@ -1018,7 +1026,7 @@ export class TodoView extends ItemView {
 
     renderTaskList(api: MsTodoApi, list: TodoList | null, listArea: HTMLElement, detail: HTMLElement) {
         if (!api.isCurrentSession() || listArea !== this.mainListArea || detail !== this.mainDetail) return;
-        this.clearDetailDatePicker();
+        this.clearDetailControls();
         listArea.empty();
         detail.empty();
         detail.removeClass('is-open');
@@ -1152,7 +1160,9 @@ export class TodoView extends ItemView {
         };
     }
 
-    clearDetailDatePicker() {
+    clearDetailControls() {
+        this.disposeDetailSteps?.();
+        this.disposeDetailSteps = undefined;
         this.disposeDetailDatePicker?.();
         this.disposeDetailDatePicker = undefined;
     }

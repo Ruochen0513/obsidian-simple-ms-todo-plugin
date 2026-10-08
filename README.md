@@ -42,6 +42,7 @@ Requires **Obsidian 1.11.5 or later**.
 - **Refresh List**: Click the "Refresh" button.
 - **Add task**: Run **Quick capture: Add task**. Assign a shortcut such as `Alt+N` in **Settings → Hotkeys**. Enter a title, choose a list and optionally set a due date, then press `Enter`. Undated tasks remain in their list and do not appear in **Planned**.
 - **Edit Details**: Select a task to edit its title, notes, due date, and important/star status.
+- **Steps**: Double-click step text (or focus it and press Enter) to edit. Enter or leaving the field saves; Esc cancels. Drag the grip to reorder, or focus the grip and use ↑/↓. Text changes sync to Microsoft. Step order is saved only in this vault and is used for Markdown exports; signing out clears it. Microsoft Graph does not expose step ordering.
 - **Older plans**: Expand the muted **Overdue** or **Earlier** row at the bottom of **Planned** when needed. Past reminders are not treated as missed deadlines.
 - **Completed tasks**: Select **Completed** at the end of the view selector to view or reopen tasks, grouped by list. Completed history loads when you open this view or search.
 - **Export to note**: Enable **Export to Markdown** in settings, then select **More → Export to note** or run **Export Microsoft To Do to Markdown**. The default file is `Microsoft To Do.md`. Each export replaces its contents; edits to this file are not sent back to Microsoft.
@@ -119,6 +120,7 @@ npm run build
 - **刷新列表**：选择顶部的**刷新**按钮。
 - **添加任务**：运行**快速捕获：添加任务**，可在**设置 → 快捷键**中分配 `Alt+N` 等快捷键。输入标题、选择清单，按需填写截止日期，按 `Enter` 添加。未设置日期的任务保存在清单中，不会显示在**计划内**。
 - **编辑详情**：选择任务后，可以编辑标题、备注、截止日期和重要状态。
+- **步骤**：双击步骤文字（或聚焦后按 Enter）原位编辑，Enter 或离开输入框保存，Esc 取消。拖动左侧手柄排序，也可聚焦手柄后按 ↑/↓。文字修改同步到微软；顺序仅保存在本知识库，导出 Markdown 时沿用，退出登录时清除。微软 Graph 接口未开放步骤排序。
 - **较早的安排**：需要时展开**计划内**底部的**逾期**或**较早安排**。过去的提醒不会被当成逾期截止日期。
 - **已完成任务**：选择视图切换器末尾的**已完成**，按清单查看或重新打开任务。仅在打开此视图或搜索时加载已完成记录。
 - **导出到笔记**：先在设置中开启**导出到 Markdown**，然后选择**更多 → 导出到笔记**，或运行命令**导出 Microsoft To Do 到 Markdown**。默认文件是 `Microsoft To Do.md`，每次导出会替换其内容；对该文件的修改不会回传给微软。

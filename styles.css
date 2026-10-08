@@ -707,7 +707,7 @@
 
 .todo-step-row {
     display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) 28px;
+    grid-template-columns: 20px 18px minmax(0, 1fr) 28px;
     align-items: start;
     min-height: 32px;
     padding: 2px 0;
@@ -737,12 +737,13 @@
     overflow-wrap: anywhere;
 }
 
-.todo-step-label.is-checked {
+.todo-step-label.is-checked .todo-step-text {
     text-decoration: line-through;
     color: var(--text-muted);
 }
 
 .ms-todo-container .todo-detail-panel button.todo-step-remove,
+.ms-todo-container .todo-detail-panel button.todo-step-drag,
 .ms-todo-container .todo-detail-panel button.todo-clear-date {
     display: inline-flex;
     align-items: center;
@@ -758,6 +759,45 @@
     cursor: pointer;
     padding: 2px;
     line-height: 0;
+}
+
+.ms-todo-container .todo-detail-panel button.todo-step-drag {
+    width: 20px;
+    color: var(--text-faint);
+    cursor: grab;
+    touch-action: none;
+}
+
+.todo-step-drag svg { width: 14px; height: 14px; }
+.todo-step-row.is-dragging { background: var(--background-modifier-hover); opacity: 0.6; }
+.todo-step-row.is-dragging .todo-step-drag { cursor: grabbing; }
+.todo-step-label { cursor: text; border-radius: 4px; }
+.todo-step-label:focus-visible,
+.todo-step-drag:focus-visible { outline: 2px solid var(--mstodo-accent); outline-offset: 2px; }
+.todo-step-row .todo-step-label.is-editing { padding: 0; }
+.ms-todo-container .todo-detail-panel textarea.todo-step-edit-input {
+    display: block;
+    field-sizing: content;
+    width: 100%;
+    min-height: 28px;
+    padding: 3px 5px;
+    border: 1px solid var(--mstodo-accent);
+    border-radius: 4px;
+    background: var(--background-primary);
+    box-shadow: none;
+    color: var(--text-normal);
+    font: inherit;
+    line-height: inherit;
+    resize: none;
+    overflow: hidden;
+}
+.todo-step-label [hidden] { display: none !important; }
+.todo-step-order-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
 }
 
 .todo-step-remove span { display: inline-flex; }
@@ -780,7 +820,7 @@
     align-items: center;
     gap: 8px;
     margin-top: 2px;
-    padding: 0;
+    padding: 0 0 0 28px;
     border: 1px solid transparent;
     border-radius: 5px;
     cursor: text;

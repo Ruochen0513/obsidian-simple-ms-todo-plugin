@@ -39,13 +39,29 @@ class Element {
     createEl(tag, options) {
         const child = new Element(options);
         child.tagName = tag.toUpperCase();
+        child.parentElement = this;
         this.children.push(child);
         return child;
     }
     createDiv(options) { return this.createEl('div', options); }
     createSpan(options) { return this.createEl('span', options); }
-    empty() { this.children = []; }
-    remove() {}
+    empty() { this.children.forEach(child => { child.detached = true; }); this.children = []; }
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this); }
+    appendChild(child) { return this.insertBefore(child, null); }
+    insertBefore(child, before) {
+        child.remove();
+        const index = before ? this.children.indexOf(before) : this.children.length;
+        this.children.splice(index, 0, child);
+        child.parentElement = this;
+        child.detached = false;
+        return child;
+    }
+    select() {}
+    get isConnected() { return !this.detached && (this.parentElement?.isConnected ?? true); }
+    setPointerCapture(id) { this.pointerId = id; }
+    hasPointerCapture(id) { return this.pointerId === id; }
+    releasePointerCapture() { this.pointerId = null; }
+    getBoundingClientRect() { const top = (this.parentElement?.children.indexOf(this) || 0) * 40; return { top, height: 40, bottom: top + 40 }; }
     setAttr(key, value) { this.attrs[key] = value; }
     getAttr(key) { return this.attrs[key]; }
     addClass(name) { this.classes.add(name); }
@@ -92,7 +108,10 @@ function setup(options = {}) {
         children = [];
         cleanups = [];
         register(callback) { this.cleanups.push(callback); }
-        registerDomEvent() {}
+        registerDomEvent(el, name, callback) {
+            el.addEventListener?.(name, callback);
+            this.register(() => { if (el.listeners?.[name] === callback) delete el.listeners[name]; });
+        }
         addChild(child) { this.children.push(child); return child; }
         removeChild(child) { this.children = this.children.filter(item => item !== child); child.unload(); return child; }
         unload() { this.children.forEach(child => child.unload()); this.cleanups.splice(0).forEach(callback => callback()); }
@@ -160,6 +179,7 @@ function setup(options = {}) {
     plugin.session.oauth.getAuthUrl = async () => 'https://example.test/login';
     plugin.session.oauth.refreshAccessToken = async () => ({ access_token: 'test-access', refresh_token: 'test-refresh', expires_in: 3600 });
     const view = new exports.TodoView({}, plugin);
+    view.app = plugin.app;
     leaves.push({ view });
     view.currentLists = [list];
     view.selectedListId = list.id;

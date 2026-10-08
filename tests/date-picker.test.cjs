@@ -27,7 +27,7 @@ test('refreshing or leaving task details disposes its calendar and document list
     view.renderTaskList(api, list, view.mainListArea, view.mainDetail);
     assert.equal(pickers[0].destroyed, true);
     assert.equal(scopes.length, 0);
-    assert.equal(view.children.length, 1);
+    assert.equal(view.children.length, 2);
     view.mainDetail.querySelector('.todo-detail-close').onclick();
     assert.equal(pickers[1].destroyed, true);
     assert.equal(view.children.length, 0);
