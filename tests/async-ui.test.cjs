@@ -69,16 +69,16 @@ test('a refresh from a previous visit cannot overwrite the current view', async 
     assert.equal(view.currentTasks, current);
 });
 
-test('smart-view refresh and completed-task preload leave active search results alone', async () => {
+test('planned refresh and loading completed history leave active search results alone', async () => {
     for (const operation of ['smart', 'completed']) {
         const { view, api } = setup();
-        view.selectedListId = '__my-day__';
+        view.selectedListId = '__planned__';
         const response = deferred();
         api.getTasks = () => response.promise;
         view.taskCache.get(list.id).allLoaded = false;
         const refreshing = operation === 'smart'
-            ? view.refreshSmartViewInBackground(api, [list], '__my-day__', list, view.mainListArea, view.mainDetail)
-            : view.preloadCompletedData(api, list);
+            ? view.refreshSmartViewInBackground(api, [list], '__planned__', list, view.mainListArea, view.mainDetail)
+            : view.loadCompletedView(api, new Element(), [list]);
         view.searchQuery = 'needle';
         const results = view.currentTasks;
         response.resolve([task]);
@@ -132,7 +132,7 @@ test('quick capture can retry an actual creation failure', async () => {
     const modal = new QuickCaptureModal({}, plugin, api, [list], list.id);
     modal.titleInput = { value: 'Quick task' };
     modal.listSelect = { value: list.id };
-    modal.todayToggle = { checked: false };
+    modal.dueDateInput = { value: '' };
     modal.confirmButton = new Element();
     api.createTask = async () => { throw new Error('Creation failed'); };
     await modal.submit();

@@ -16,6 +16,7 @@ const source = buildSync({
             export { t, setLocale, getLocale, formatTimestamp } from './src/i18n';
             export { en } from './src/i18n/locales/en';
             export { zhCn } from './src/i18n/locales/zh-cn';
+            export { getPlannedDate, isPlannedTask, groupPlannedTasks } from './src/utils/planned-tasks';
             export { formatDisplayDate, formatShortDate } from './src/utils/task-dates';
         `,
         resolveDir: path.resolve(__dirname, '..'),

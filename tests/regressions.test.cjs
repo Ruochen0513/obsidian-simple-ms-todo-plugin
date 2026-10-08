@@ -56,14 +56,14 @@ test('quick capture reports partial success without allowing duplicate creation'
     const modal = new QuickCaptureModal({}, plugin, api, [list], list.id);
     modal.titleInput = { value: 'Quick task' };
     modal.listSelect = { value: list.id };
-    modal.todayToggle = { checked: true };
+    modal.dueDateInput = { value: '2026-10-20' };
     modal.confirmButton = new Element();
     await modal.submit();
     await modal.submit();
     assert.equal(created, 1);
     assert.equal(modal.closed, true);
     assert(view.taskCache.get(list.id).tasks.some(item => item.id === 'created-1'));
-    assert.match(notices.at(-1), /created.*Test list.*today failed/i);
+    assert.match(notices.at(-1), /created.*Test list.*due date failed/i);
 });
 
 test('a list refresh finishing during search updates cache without replacing results', async () => {

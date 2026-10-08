@@ -6,11 +6,11 @@ An unofficial plugin for [Obsidian](https://obsidian.md) that allows you to inte
 
 ## ✨ Features
 
-- **Sidebar Integration**: View your to-dos in the Obsidian sidebar without switching windows.
+- **Plan-focused sidebar**: Open **Planned** to see unfinished tasks with due dates or enabled reminders, grouped into Today, Tomorrow and Later. Older plans are collapsed below.
 - **Task Management**:
     - ✅ **View Tasks**: Select and view tasks from any Microsoft To Do list, not only the default list.
     - 🗂️ **Manage Lists**: Create custom lists and delete non-default lists from the sidebar.
-    - ➕ **Add Tasks**: Quickly create new tasks in the selected list via the input box at the bottom.
+    - ➕ **Quick capture**: Add a task through the command palette or an assigned hotkey, with a target list and optional due date.
     - ☑️ **Complete Tasks**: Click the checkbox to mark tasks as completed or reopen completed tasks.
     - 🗓️ **Due Dates & Importance**: Edit due dates and mark tasks as important from the task detail panel.
     - 📝 **Notes & Markdown export**: Edit task notes in Obsidian, and write all lists, tasks, notes, and checklist steps into an Obsidian note.
@@ -37,12 +37,13 @@ Requires **Obsidian 1.11.5 or later**.
 
 ### Common Operations
 
-- **Select list**: Use the view selector at the top. **Due today** shows tasks whose due date is today; **Overdue** shows earlier due dates.
+- **Select view or list**: Use the selector at the top. **Planned** combines scheduled tasks across lists; select a list to see all its unfinished tasks. A task's due date determines its group, or its reminder date if no due date is set.
 - **Manage lists**: Select **Create list** in the view selector. To delete a non-default list, select **More → Delete current list**.
 - **Refresh List**: Click the "Refresh" button.
-- **Add Task**: Type in the input box at the bottom of the selected list and press `Enter`.
+- **Add task**: Run **Quick capture: Add task**. Assign a shortcut such as `Alt+N` in **Settings → Hotkeys**. Enter a title, choose a list and optionally set a due date, then press `Enter`. Undated tasks remain in their list and do not appear in **Planned**.
 - **Edit Details**: Select a task to edit its title, notes, due date, and important/star status.
-- **Completed tasks**: Expand **Completed** to view or reopen completed tasks.
+- **Older plans**: Expand the muted **Overdue** or **Earlier** row at the bottom of **Planned** when needed. Past reminders are not treated as missed deadlines.
+- **Completed tasks**: Select **Completed** at the end of the view selector to view or reopen tasks, grouped by list. Completed history loads when you open this view or search.
 - **Export to note**: Enable **Export to Markdown** in settings, then select **More → Export to note** or run **Export Microsoft To Do to Markdown**. The default file is `Microsoft To Do.md`. Each export replaces its contents; edits to this file are not sent back to Microsoft.
 - **Sign out**: Select **More → Sign out**, or sign out in plugin settings. Your language and export preferences are kept.
 
@@ -82,11 +83,11 @@ npm run build
 
 ## ✨ 功能特性
 
-- **侧边栏集成**：在 Obsidian 侧边栏中查看您的待办事项，无需切换窗口。
+- **以计划为中心的侧边栏**：默认打开**计划内**，按今天、明天和以后展示有截止日期或已开启提醒的未完成任务，较早的安排收起在底部。
 - **任务管理**：
     - ✅ **查看任务**：可以选择并查看任意 Microsoft To Do 清单，不再只读取默认清单。
     - 🗂️ **管理清单**：可在侧边栏创建自定义清单，并删除非默认清单。
-    - ➕ **添加任务**：通过底部输入框把任务创建到当前选中的清单。
+    - ➕ **快速捕获**：通过命令面板或自定义快捷键添加任务，选择目标清单，并按需填写截止日期。
     - ☑️ **完成任务**：点击复选框即可标记任务完成，也可以重新打开已完成任务。
     - 🗓️ **截止日期与重要标记**：在任务详情面板编辑截止日期，并将任务标记为重要。
     - 📝 **备注与导出到文档**：可在 Obsidian 里编辑任务备注，并将全部清单、任务、详细备注和检查步骤写入 Obsidian 笔记。
@@ -113,12 +114,13 @@ npm run build
 
 ### 常用操作
 
-- **选择清单**：使用顶部的视图选择器。**今天到期**显示截止日期为今天的任务，**逾期**显示截止日期早于今天的任务。
+- **选择视图或清单**：使用顶部的选择器。**计划内**汇总各清单中的安排，选择具体清单则显示该清单的所有未完成任务。分组优先使用截止日期，没有截止日期时使用提醒日期。
 - **管理清单**：在视图选择器中选择**新建清单**。删除非默认清单时，选择**更多 → 删除当前清单**。
 - **刷新列表**：选择顶部的**刷新**按钮。
-- **添加任务**：在当前清单底部的输入框输入内容，按下 `Enter` 键即可。
+- **添加任务**：运行**快速捕获：添加任务**，可在**设置 → 快捷键**中分配 `Alt+N` 等快捷键。输入标题、选择清单，按需填写截止日期，按 `Enter` 添加。未设置日期的任务保存在清单中，不会显示在**计划内**。
 - **编辑详情**：选择任务后，可以编辑标题、备注、截止日期和重要状态。
-- **已完成任务**：展开**已完成**分组，查看或重新打开任务。
+- **较早的安排**：需要时展开**计划内**底部的**逾期**或**较早安排**。过去的提醒不会被当成逾期截止日期。
+- **已完成任务**：选择视图切换器末尾的**已完成**，按清单查看或重新打开任务。仅在打开此视图或搜索时加载已完成记录。
 - **导出到笔记**：先在设置中开启**导出到 Markdown**，然后选择**更多 → 导出到笔记**，或运行命令**导出 Microsoft To Do 到 Markdown**。默认文件是 `Microsoft To Do.md`，每次导出会替换其内容；对该文件的修改不会回传给微软。
 - **退出登录**：选择**更多 → 退出登录**，或在插件设置页退出。语言和导出偏好会保留。
 

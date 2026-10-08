@@ -31,7 +31,7 @@ test('translations preserve zero values and interpolate names without interpreti
     const vars = { listCount: 0, taskCount: 0, path: 'Tasks.md' };
     assert.match(t('notices.syncCompleted', vars), /0 tasks from 0 lists/);
     setLocale('zh-cn');
-    assert.equal(t('notices.taskAddedDueToday', { listName: '<我的任务>' }), '已添加到「<我的任务>」，今天到期');
+    assert.equal(t('notices.taskAddedWithDate', { listName: '<我的任务>', date: '10月20日' }), '已添加到「<我的任务>」，截止 10月20日');
 });
 
 test('dates and export timestamps follow plugin language and preserve the calendar date', () => {

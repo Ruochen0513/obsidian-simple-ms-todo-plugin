@@ -4,26 +4,27 @@ import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
 import { syncTasksToMarkdown } from '../commands';
 import { t } from '../i18n';
 import { taskBodyText } from '../utils/task-body';
-import { buildTaskMeta, toLocalDateKey, dateToInputValue, isTaskDueOn, isTaskOverdue } from '../utils/task-dates';
+import { buildTaskMeta, toLocalDateKey, isTaskOverdue, formatShortDate } from '../utils/task-dates';
+import { getPlannedDate, isPlannedTask, groupPlannedTasks } from '../utils/planned-tasks';
 import type { TaskCacheEntry, TaskCacheSnapshot } from '../sync/task-cache';
 import { DeleteConfirmModal, CreateListModal } from './task-modals';
 import { renderTaskDetail } from './task-detail';
 
 export const VIEW_TYPE_TODO = 'ms-todo-view';
-const MY_DAY_VIEW_ID = '__my-day__';
-const OVERDUE_VIEW_ID = '__overdue__';
+const PLANNED_VIEW_ID = '__planned__';
+const COMPLETED_VIEW_ID = '__completed__';
 
 function isSmartViewId(id: string | null): boolean {
-    return id === MY_DAY_VIEW_ID || id === OVERDUE_VIEW_ID;
+    return id === PLANNED_VIEW_ID || id === COMPLETED_VIEW_ID;
 }
 
 const TASK_CACHE_TTL_MS = 30_000;
 
 export class TodoView extends ItemView {
     plugin: MsTodoPlugin;
-    selectedListId: string | null = MY_DAY_VIEW_ID;
+    selectedListId: string | null = PLANNED_VIEW_ID;
     selectedTaskId: string | null = null;
-    showCompleted = false;
+    showEarlier = false;
     currentTasks: TodoTask[] = [];
     currentLists: TodoList[] = [];
     viewTransitionToken = 0;
@@ -83,9 +84,9 @@ export class TodoView extends ItemView {
             this.pendingTaskIds.clear();
             this.pendingChecklistItemIds.clear();
             this.recentlyMutatedTaskIds.clear();
-            this.selectedListId = MY_DAY_VIEW_ID;
+            this.selectedListId = PLANNED_VIEW_ID;
             this.selectedTaskId = null;
-            this.showCompleted = false;
+            this.showEarlier = false;
             this.currentLists = [];
             this.currentTasks = [];
             this.taskListByTaskId.clear();
@@ -161,7 +162,7 @@ export class TodoView extends ItemView {
     normalizeSelectedView(lists: TodoList[]) {
         if (isSmartViewId(this.selectedListId)) return;
         if (this.selectedListId && lists.some((list) => list.id === this.selectedListId)) return;
-        this.selectedListId = MY_DAY_VIEW_ID;
+        this.selectedListId = PLANNED_VIEW_ID;
     }
 
     getSelectedList(lists: TodoList[]): TodoList | null {
@@ -192,10 +193,10 @@ export class TodoView extends ItemView {
         this.renderSearchBar(api, selectorHost, main, lists);
         this.renderTaskSkeleton(main);
 
-        if (this.selectedListId === OVERDUE_VIEW_ID) {
-            await this.loadOverdueView(api, main, lists);
-        } else if (this.selectedListId === MY_DAY_VIEW_ID) {
-            await this.loadMyDay(api, main, lists);
+        if (this.selectedListId === COMPLETED_VIEW_ID) {
+            await this.loadCompletedView(api, main, lists);
+        } else if (this.selectedListId === PLANNED_VIEW_ID) {
+            await this.loadPlannedView(api, main, lists);
         } else if (selectedList) {
             await this.loadTaskList(api, main, selectedList);
         }
@@ -220,10 +221,11 @@ export class TodoView extends ItemView {
         const updateSelector = () => {
             selectorIcon.empty();
             if (isSmartViewId(this.selectedListId)) {
-                const isOverdue = this.selectedListId === OVERDUE_VIEW_ID;
-                setIcon(selectorIcon, isOverdue ? 'calendar-clock' : 'sun');
-                label.setText(isOverdue ? t('smartView.overdue') : t('smartView.myDay'));
-                selector.setAttr('aria-label', t('sidebar.currentViewAria', { viewName: isOverdue ? t('smartView.overdue') : t('smartView.myDay') }));
+                const completed = this.selectedListId === COMPLETED_VIEW_ID;
+                const name = completed ? t('smartView.completed') : t('smartView.planned');
+                setIcon(selectorIcon, completed ? 'check-check' : 'calendar-days');
+                label.setText(name);
+                selector.setAttr('aria-label', t('sidebar.currentViewAria', { viewName: name }));
                 return;
             }
 
@@ -250,12 +252,12 @@ export class TodoView extends ItemView {
             this.clearSearchState();
             this.selectedListId = viewId;
             this.selectedTaskId = null;
-            this.showCompleted = false;
+            this.showEarlier = false;
             updateSelector();
             renderMenuItems();
-            const loader = viewId === OVERDUE_VIEW_ID
-                ? (token: number) => this.loadOverdueView(api, main, lists, token)
-                : (token: number) => this.loadMyDay(api, main, lists, token);
+            const loader = viewId === COMPLETED_VIEW_ID
+                ? (token: number) => this.loadCompletedView(api, main, lists, token)
+                : (token: number) => this.loadPlannedView(api, main, lists, token);
             void this.transitionToView(api, main, loader);
         };
 
@@ -265,7 +267,7 @@ export class TodoView extends ItemView {
             this.clearSearchState();
             this.selectedListId = list.id;
             this.selectedTaskId = null;
-            this.showCompleted = false;
+            this.showEarlier = false;
             updateSelector();
             renderMenuItems();
             void this.transitionToView(api, main, (token) => this.loadTaskList(api, main, list, token));
@@ -274,27 +276,19 @@ export class TodoView extends ItemView {
         const renderMenuItems = () => {
             panel.empty();
 
-            panel.createDiv({ text: t('sidebar.smartViews'), cls: 'todo-list-menu-section-label' });
-            const smartViews: Array<{ id: string; label: string; icon: string }> = [
-                { id: MY_DAY_VIEW_ID, label: t('smartView.myDay'), icon: 'sun' },
-                { id: OVERDUE_VIEW_ID, label: t('smartView.overdue'), icon: 'calendar-clock' },
-            ];
-            smartViews.forEach((view) => {
+            const addViewItem = (id: string, name: string, glyph: string, secondary = false) => {
                 const item = panel.createEl('button', { cls: 'todo-list-menu-item todo-smart-view-item' });
                 item.setAttr('type', 'button');
                 item.setAttr('role', 'menuitem');
-                if (this.selectedListId === view.id) item.addClass('is-active');
+                item.setAttr('data-view-id', id);
+                if (secondary) item.addClass('todo-list-menu-secondary');
+                if (this.selectedListId === id) item.addClass('is-active');
                 const icon = item.createSpan({ cls: 'todo-list-menu-item-icon' });
-                setIcon(icon, this.selectedListId === view.id ? 'check' : view.icon);
-                item.createSpan({ text: view.label, cls: 'todo-list-menu-item-label' });
-                if (view.id === OVERDUE_VIEW_ID) {
-                    const overdueCount = this.getOverdueCount();
-                    if (overdueCount !== null && overdueCount > 0) {
-                        item.createSpan({ text: String(overdueCount), cls: 'todo-list-menu-item-count', attr: { 'aria-label': t('smartView.overdueCountAria') } });
-                    }
-                }
-                item.onclick = () => switchToSmartView(view.id);
-            });
+                setIcon(icon, this.selectedListId === id ? 'check' : glyph);
+                item.createSpan({ text: name, cls: 'todo-list-menu-item-label' });
+                item.onclick = () => switchToSmartView(id);
+            };
+            addViewItem(PLANNED_VIEW_ID, t('smartView.planned'), 'calendar-days');
 
             panel.createDiv({ cls: 'todo-list-menu-separator' });
             panel.createDiv({ text: t('sidebar.lists'), cls: 'todo-list-menu-section-label' });
@@ -323,6 +317,8 @@ export class TodoView extends ItemView {
                 closeMenu();
                 void this.promptCreateList(api);
             };
+            panel.createDiv({ cls: 'todo-list-menu-separator' });
+            addViewItem(COMPLETED_VIEW_ID, t('smartView.completed'), 'check-check', true);
         };
 
         renderMenuItems();
@@ -397,7 +393,7 @@ export class TodoView extends ItemView {
             if (!host.hasClass('is-searching')) return;
             const target = event.target as HTMLElement | null;
             if (!target) return;
-            if (target.closest('.todo-search-bar, .todo-header, .todo-task-row, .todo-detail-panel, .todo-add-composer, .todo-completed-heading')) return;
+            if (target.closest('.todo-search-bar, .todo-header, .todo-task-row, .todo-detail-panel, .todo-earlier-toggle')) return;
             close();
         });
 
@@ -435,7 +431,7 @@ export class TodoView extends ItemView {
         const token = ++this.viewTransitionToken;
         const query = this.searchQuery.trim().toLowerCase();
         try {
-            await this.warmAllListCaches(api, lists);
+            await Promise.all(lists.map(list => this.ensureAllTasksLoaded(api, list.id)));
         } catch (error) {
             if (api.isCurrentSession() && token === this.viewTransitionToken) {
                 new Notice(t('notices.loadViewFailed'));
@@ -482,10 +478,10 @@ export class TodoView extends ItemView {
         const token = ++this.viewTransitionToken;
         main.removeClass('is-list-leaving', 'is-list-loading', 'is-list-entering');
         try {
-            if (this.selectedListId === OVERDUE_VIEW_ID) {
-                await this.loadOverdueView(api, main, lists, token);
-            } else if (this.selectedListId === MY_DAY_VIEW_ID) {
-                await this.loadMyDay(api, main, lists, token);
+            if (this.selectedListId === COMPLETED_VIEW_ID) {
+                await this.loadCompletedView(api, main, lists, token);
+            } else if (this.selectedListId === PLANNED_VIEW_ID) {
+                await this.loadPlannedView(api, main, lists, token);
             } else {
                 const list = this.getSelectedList(lists);
                 if (list) await this.loadTaskList(api, main, list, token);
@@ -610,7 +606,7 @@ export class TodoView extends ItemView {
             const list = await api.createTaskList(name);
             this.selectedListId = list.id;
             this.selectedTaskId = null;
-            this.showCompleted = false;
+            this.showEarlier = false;
             new Notice(t('notices.listCreated'));
             await this.render();
         } catch (error) {
@@ -634,10 +630,10 @@ export class TodoView extends ItemView {
             this.taskCache.delete(list.id);
             this.scheduleCachePersist();
             if (this.selectedListId === list.id) {
-                this.selectedListId = MY_DAY_VIEW_ID;
+                this.selectedListId = PLANNED_VIEW_ID;
                 this.selectedTaskId = null;
             }
-            this.showCompleted = false;
+            this.showEarlier = false;
             new Notice(t('notices.listDeleted'));
             await this.render();
         } catch (error) {
@@ -823,48 +819,20 @@ export class TodoView extends ItemView {
         return loading;
     }
 
-    collectMyDayTasks(lists: TodoList[]): TodoTask[] {
-        const today = toLocalDateKey(new Date());
+    collectSmartTasks(lists: TodoList[], viewId = this.selectedListId): TodoTask[] {
         this.taskListByTaskId.clear();
         const tasks: TodoTask[] = [];
-
-        lists.forEach((list) => {
-            const entry = this.taskCache.get(list.id);
-            if (!entry) return;
-            entry.tasks.forEach((task) => {
-                if (!isTaskDueOn(task, today)) return;
+        for (const list of lists) {
+            for (const task of this.taskCache.get(list.id)?.tasks || []) {
+                const included = viewId === PLANNED_VIEW_ID ? isPlannedTask(task) : task.status === 'completed';
+                if (!included) continue;
                 this.taskListByTaskId.set(task.id, list);
                 tasks.push(task);
-            });
-        });
-
-        return tasks;
-    }
-
-    collectOverdueTasks(lists: TodoList[]): TodoTask[] {
-        const today = toLocalDateKey(new Date());
-        this.taskListByTaskId.clear();
-        const tasks: TodoTask[] = [];
-
-        lists.forEach((list) => {
-            const entry = this.taskCache.get(list.id);
-            if (!entry) return;
-            entry.tasks.forEach((task) => {
-                if (!isTaskOverdue(task, today)) return;
-                this.taskListByTaskId.set(task.id, list);
-                tasks.push(task);
-            });
-        });
-
-        tasks.sort((a, b) => {
-            const aDue = dateToInputValue(a.dueDateTime?.dateTime || '');
-            const bDue = dateToInputValue(b.dueDateTime?.dateTime || '');
-            if (aDue !== bDue) return aDue < bDue ? -1 : 1;
-            const aImportant = a.importance === 'high' ? 1 : 0;
-            const bImportant = b.importance === 'high' ? 1 : 0;
-            return bImportant - aImportant;
-        });
-
+            }
+        }
+        if (viewId === COMPLETED_VIEW_ID) {
+            tasks.sort((a, b) => (b.completedDateTime?.dateTime || '').localeCompare(a.completedDateTime?.dateTime || ''));
+        }
         return tasks;
     }
 
@@ -876,50 +844,6 @@ export class TodoView extends ItemView {
             api.assertCurrentSession();
             this.setTaskCache(list.id, tasks, false);
         }));
-    }
-
-    getOverdueCount(): number | null {
-        if (this.currentLists.length === 0) return null;
-        const allCached = this.currentLists.every((list) => this.taskCache.has(list.id));
-        if (!allCached) return null;
-        const today = toLocalDateKey(new Date());
-        let count = 0;
-        this.currentLists.forEach((list) => {
-            this.taskCache.get(list.id)?.tasks.forEach((task) => {
-                if (task.status !== 'completed' && isTaskOverdue(task, today)) count++;
-            });
-        });
-        return count;
-    }
-
-    isCompletedDataReady(list: TodoList | null): boolean {
-        if (isSmartViewId(this.selectedListId)) {
-            return this.currentLists.every((item) => this.taskCache.get(item.id)?.allLoaded === true);
-        }
-        return !!list && this.taskCache.get(list.id)?.allLoaded === true;
-    }
-
-    async preloadCompletedData(api: MsTodoApi, list: TodoList | null) {
-        const token = this.viewTransitionToken;
-        try {
-            if (isSmartViewId(this.selectedListId)) {
-                await Promise.all(this.currentLists.map((item) => this.ensureAllTasksLoaded(api, item.id)));
-                if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
-                if (this.selectedListId === MY_DAY_VIEW_ID) {
-                    this.currentTasks = this.collectMyDayTasks(this.currentLists);
-                } else if (this.selectedListId === OVERDUE_VIEW_ID) {
-                    this.currentTasks = this.collectOverdueTasks(this.currentLists);
-                }
-                return;
-            }
-
-            if (!list) return;
-            const tasks = await this.ensureAllTasksLoaded(api, list.id);
-            if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
-            if (this.selectedListId === list.id) this.currentTasks = tasks;
-        } catch (error) {
-            console.warn('Microsoft To Do: failed to preload completed tasks', error);
-        }
     }
 
     async refreshCachedList(api: MsTodoApi, list: TodoList, listArea: HTMLElement, detail: HTMLElement) {
@@ -942,160 +866,45 @@ export class TodoView extends ItemView {
         }
     }
 
-    handleExternalTaskCreated(task: TodoTask, list: TodoList, dueToday: boolean) {
+    handleExternalTaskCreated(task: TodoTask, list: TodoList) {
         this.upsertTaskInCache(list.id, task);
         this.markTaskRecentlyMutated(task.id);
-
         if (this.isSearchMode()) return;
-
         if (this.selectedListId === list.id) {
             this.taskListByTaskId.set(task.id, list);
-            this.currentTasks = [task, ...this.currentTasks];
-        } else if (this.selectedListId === MY_DAY_VIEW_ID && dueToday) {
-            this.currentTasks = this.collectMyDayTasks(this.currentLists);
+            this.currentTasks = [task, ...this.currentTasks.filter(item => item.id !== task.id)];
+        } else if (this.selectedListId === PLANNED_VIEW_ID) {
+            this.currentTasks = this.collectSmartTasks(this.currentLists);
         } else {
             return;
         }
-
         if (this.mainListArea && this.mainDetail) {
             this.renderTaskList(new MsTodoApi(this.plugin), this.currentRenderList, this.mainListArea, this.mainDetail);
         }
     }
 
-    createOptimisticTask(title: string, dueDate?: string): TodoTask {
-        const now = new Date().toISOString();
-        return {
-            id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            title,
-            status: 'notStarted',
-            importance: 'normal',
-            createdDateTime: now,
-            dueDateTime: dueDate ? { dateTime: `${dueDate}T00:00:00`, timeZone: 'UTC' } : undefined,
-        };
-    }
-
-    replaceTemporaryTask(tempId: string, realTask: TodoTask, list: TodoList) {
-        this.pendingTaskIds.delete(tempId);
-        this.markTaskRecentlyMutated(realTask.id);
-        this.currentTasks = this.currentTasks.map((task) => task.id === tempId ? realTask : task);
-        const entry = this.taskCache.get(list.id);
-        if (entry) {
-            entry.tasks = entry.tasks.map((task) => task.id === tempId ? realTask : task);
-            entry.updatedAt = Date.now();
-        } else {
-            this.setTaskCache(list.id, [realTask], false);
-        }
-        this.taskListByTaskId.delete(tempId);
-        this.taskListByTaskId.set(realTask.id, list);
-        if (this.selectedTaskId === tempId) this.selectedTaskId = realTask.id;
-        this.scheduleCachePersist();
-    }
-
-    removeOptimisticTask(tempId: string, listId: string) {
-        this.pendingTaskIds.delete(tempId);
-        this.currentTasks = this.currentTasks.filter((task) => task.id !== tempId);
-        this.removeTaskFromCache(listId, tempId);
-        this.taskListByTaskId.delete(tempId);
-        if (this.selectedTaskId === tempId) this.selectedTaskId = null;
-    }
-
-    async loadMyDay(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token = this.viewTransitionToken) {
-        const today = toLocalDateKey(new Date());
+    async loadPlannedView(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token = this.viewTransitionToken) {
         await this.warmAllListCaches(api, lists);
-
-        if (!api.isCurrentSession() || token !== this.viewTransitionToken) return;
-
-        this.currentTasks = this.collectMyDayTasks(lists);
-        main.empty();
-
-        const listArea = main.createDiv({ cls: 'todo-task-list-area' });
-        const detail = main.createDiv({ cls: 'todo-detail-panel' });
-        const defaultList = lists.find((list) => list.wellknownListName === 'defaultList') || lists[0] || null;
-        this.mainListArea = listArea;
-        this.mainDetail = detail;
-        this.currentRenderList = defaultList;
-
-        if (defaultList) {
-            const composer = main.createDiv({ cls: 'todo-add-composer' });
-            const plus = composer.createSpan({ cls: 'todo-add-icon' });
-            setIcon(plus, 'plus');
-            const input = composer.createEl('input', {
-                cls: 'todo-add-input',
-                placeholder: t('taskDetail.addTodayPlaceholder'),
-            });
-            input.setAttr('aria-label', t('taskDetail.addTodayAria', { listName: defaultList.displayName }));
-
-            const createTask = () => {
-                if (!api.isCurrentSession()) return;
-                const taskTitle = input.value.trim();
-                if (!taskTitle) return;
-
-                const optimisticTask = this.createOptimisticTask(taskTitle, today);
-                this.pendingTaskIds.add(optimisticTask.id);
-                this.taskListByTaskId.set(optimisticTask.id, defaultList);
-                this.currentTasks = [optimisticTask, ...this.currentTasks];
-                this.upsertTaskInCache(defaultList.id, optimisticTask);
-                input.value = '';
-                this.renderTaskList(api, defaultList, listArea, detail);
-                input.focus();
-
-                void (async () => {
-                    let created: TodoTask | null = null;
-                    try {
-                        created = await api.createTask(defaultList.id, taskTitle);
-                        const task = await api.updateTaskDueDate(defaultList.id, created.id, today);
-                        this.replaceTemporaryTask(optimisticTask.id, task, defaultList);
-                        this.renderTaskList(api, defaultList, listArea, detail);
-                    } catch (error) {
-                        if (!api.isCurrentSession()) return;
-                        this.removeOptimisticTask(optimisticTask.id, defaultList.id);
-                        if (created) {
-                            this.upsertTaskInCache(defaultList.id, created);
-                            new Notice(t('notices.taskCreatedDueTodayFailed', { listName: defaultList.displayName }));
-                        } else {
-                            new Notice(t('notices.addTodayTaskFailed'));
-                            if (!input.value) input.value = taskTitle;
-                        }
-                        this.renderTaskList(api, defaultList, listArea, detail);
-                        console.error(error);
-                    }
-                })();
-            };
-
-            input.addEventListener('keydown', (event: KeyboardEvent) => {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    createTask();
-                }
-            });
-
-            plus.onclick = () => input.focus();
-            composer.onclick = (event) => {
-                if (event.target === composer) input.focus();
-            };
-        }
-
-        this.renderTaskList(api, defaultList, listArea, detail);
-        void this.preloadCompletedData(api, defaultList);
-        void this.refreshSmartViewInBackground(api, lists, MY_DAY_VIEW_ID, defaultList, listArea, detail);
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
+        this.currentTasks = this.collectSmartTasks(lists, PLANNED_VIEW_ID);
+        this.renderTaskArea(api, main, null);
+        void this.refreshSmartViewInBackground(api, lists, PLANNED_VIEW_ID, null, this.mainListArea!, this.mainDetail!);
     }
 
-    async loadOverdueView(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token = this.viewTransitionToken) {
-        await this.warmAllListCaches(api, lists);
+    async loadCompletedView(api: MsTodoApi, main: HTMLElement, lists: TodoList[], token = this.viewTransitionToken) {
+        await Promise.all(lists.map(list => this.ensureAllTasksLoaded(api, list.id)));
+        if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
+        this.currentTasks = this.collectSmartTasks(lists, COMPLETED_VIEW_ID);
+        this.renderTaskArea(api, main, null);
+        void this.refreshSmartViewInBackground(api, lists, COMPLETED_VIEW_ID, null, this.mainListArea!, this.mainDetail!);
+    }
 
-        if (!api.isCurrentSession() || token !== this.viewTransitionToken) return;
-
-        this.currentTasks = this.collectOverdueTasks(lists);
+    renderTaskArea(api: MsTodoApi, main: HTMLElement, list: TodoList | null) {
         main.empty();
-
-        const listArea = main.createDiv({ cls: 'todo-task-list-area' });
-        const detail = main.createDiv({ cls: 'todo-detail-panel' });
-        this.mainListArea = listArea;
-        this.mainDetail = detail;
-        this.currentRenderList = null;
-        this.renderTaskList(api, null, listArea, detail);
-        void this.preloadCompletedData(api, null);
-        void this.refreshSmartViewInBackground(api, lists, OVERDUE_VIEW_ID, null, listArea, detail);
+        this.mainListArea = main.createDiv({ cls: 'todo-task-list-area' });
+        this.mainDetail = main.createDiv({ cls: 'todo-detail-panel' });
+        this.currentRenderList = list;
+        this.renderTaskList(api, list, this.mainListArea, this.mainDetail);
     }
 
     async refreshSmartViewInBackground(
@@ -1129,9 +938,7 @@ export class TodoView extends ItemView {
         }
 
         if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode() || this.selectedListId !== viewId) return;
-        this.currentTasks = viewId === OVERDUE_VIEW_ID
-            ? this.collectOverdueTasks(lists)
-            : this.collectMyDayTasks(lists);
+        this.currentTasks = this.collectSmartTasks(lists, viewId);
         this.renderTaskList(api, renderList, listArea, detail);
     }
 
@@ -1152,67 +959,8 @@ export class TodoView extends ItemView {
         this.taskListByTaskId.clear();
         tasks.forEach((task) => this.taskListByTaskId.set(task.id, list));
         this.currentTasks = tasks;
-        main.empty();
-
-        const listArea = main.createDiv({ cls: 'todo-task-list-area' });
-        const detail = main.createDiv({ cls: 'todo-detail-panel' });
-        this.mainListArea = listArea;
-        this.mainDetail = detail;
-        this.currentRenderList = list;
-        const composer = main.createDiv({ cls: 'todo-add-composer' });
-        const plus = composer.createSpan({ cls: 'todo-add-icon' });
-        setIcon(plus, 'plus');
-        const input = composer.createEl('input', {
-            cls: 'todo-add-input',
-            placeholder: t('taskDetail.addTaskPlaceholder'),
-        });
-        input.setAttr('aria-label', t('taskDetail.addTaskAria', { listName: list.displayName }));
-
-        const createTask = () => {
-            if (!api.isCurrentSession()) return;
-            const taskTitle = input.value.trim();
-            if (!taskTitle) return;
-
-            const optimisticTask = this.createOptimisticTask(taskTitle);
-            this.pendingTaskIds.add(optimisticTask.id);
-            this.taskListByTaskId.set(optimisticTask.id, list);
-            this.currentTasks = [optimisticTask, ...this.currentTasks];
-            this.upsertTaskInCache(list.id, optimisticTask);
-            input.value = '';
-            this.renderTaskList(api, list, listArea, detail);
-            input.focus();
-
-            void (async () => {
-                try {
-                    const task = await api.createTask(list.id, taskTitle);
-                    this.replaceTemporaryTask(optimisticTask.id, task, list);
-                    this.renderTaskList(api, list, listArea, detail);
-                } catch (error) {
-                    if (!api.isCurrentSession()) return;
-                    this.removeOptimisticTask(optimisticTask.id, list.id);
-                    if (!input.value) input.value = taskTitle;
-                    this.renderTaskList(api, list, listArea, detail);
-                    new Notice(t('notices.addTaskFailedRestored'));
-                    console.error(error);
-                }
-            })();
-        };
-
-        input.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                createTask();
-            }
-        });
-
-        plus.onclick = () => input.focus();
-        composer.onclick = (event) => {
-            if (event.target === composer) input.focus();
-        };
-
-        this.renderTaskList(api, list, listArea, detail);
-        void this.preloadCompletedData(api, list);
-        if (cached) void this.refreshCachedList(api, list, listArea, detail);
+        this.renderTaskArea(api, main, list);
+        if (cached) void this.refreshCachedList(api, list, this.mainListArea!, this.mainDetail!);
     }
 
     async toggleTaskCompletionOptimistically(
@@ -1241,7 +989,7 @@ export class TodoView extends ItemView {
         this.pendingTaskIds.add(task.id);
         this.markTaskRecentlyMutated(task.id);
         this.replaceTask(optimisticTask, list.id);
-        if (completing && !this.showCompleted && this.selectedTaskId === task.id) {
+        if (this.selectedTaskId === task.id && (completing || this.selectedListId === COMPLETED_VIEW_ID)) {
             this.selectedTaskId = null;
         }
         this.renderTaskList(api, list, listArea, detail);
@@ -1265,115 +1013,69 @@ export class TodoView extends ItemView {
         }
     }
 
-    async loadCompletedForCurrentView(
-        api: MsTodoApi,
-        list: TodoList | null,
-        listArea: HTMLElement,
-        detail: HTMLElement,
-    ) {
-        const token = this.viewTransitionToken;
-        try {
-            if (isSmartViewId(this.selectedListId)) {
-                await Promise.all(this.currentLists.map((item) => this.ensureAllTasksLoaded(api, item.id)));
-                if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode() || !this.showCompleted) return;
-                this.currentTasks = this.selectedListId === OVERDUE_VIEW_ID
-                    ? this.collectOverdueTasks(this.currentLists)
-                    : this.collectMyDayTasks(this.currentLists);
-                this.renderTaskList(api, list, listArea, detail);
-                return;
-            }
-
-            if (!list) return;
-            const selectedId = this.selectedListId;
-            const tasks = await this.ensureAllTasksLoaded(api, list.id);
-            if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode() || this.selectedListId !== selectedId || !this.showCompleted) return;
-            this.currentTasks = tasks;
-            tasks.forEach((task) => this.taskListByTaskId.set(task.id, list));
-            this.renderTaskList(api, list, listArea, detail);
-        } catch (error) {
-            if (api.isCurrentSession() && token === this.viewTransitionToken && this.showCompleted) {
-                new Notice(t('notices.loadCompletedFailed'));
-                this.renderTaskList(api, list, listArea, detail);
-            }
-            console.error(error);
-        }
-    }
-
     renderTaskList(api: MsTodoApi, list: TodoList | null, listArea: HTMLElement, detail: HTMLElement) {
         if (!api.isCurrentSession() || listArea !== this.mainListArea || detail !== this.mainDetail) return;
         listArea.empty();
         detail.empty();
         detail.removeClass('is-open');
 
-        const activeTasks = this.currentTasks.filter((task) => task.status !== 'completed');
-        const completedTasks = this.currentTasks.filter((task) => task.status === 'completed');
-
-        if (activeTasks.length === 0) {
-            let emptyTitle: string;
-            let emptySubtitle: string;
-            if (this.isSearchMode()) {
-                emptyTitle = t('search.emptyTitle');
-                emptySubtitle = t('search.emptySubtitle');
-            } else if (this.selectedListId === MY_DAY_VIEW_ID) {
-                emptyTitle = t('empty.myDayTitle');
-                emptySubtitle = t('empty.myDaySubtitle');
-            } else if (this.selectedListId === OVERDUE_VIEW_ID) {
-                emptyTitle = t('empty.overdueTitle');
-                emptySubtitle = t('empty.overdueSubtitle');
-            } else {
-                emptyTitle = t('empty.defaultTitle');
-                emptySubtitle = t('empty.defaultSubtitle');
-            }
-            const empty = listArea.createDiv({ cls: 'todo-empty' });
-            const emptyIcon = empty.createSpan({ cls: 'todo-empty-icon' });
-            setIcon(emptyIcon, 'circle-check-big');
-            empty.createEl('div', { text: emptyTitle, cls: 'todo-empty-title' });
-            empty.createEl('div', { text: emptySubtitle, cls: 'todo-empty-subtitle' });
-        } else {
-            activeTasks.forEach((task) => {
+        const completed = this.selectedListId === COMPLETED_VIEW_ID;
+        const planned = this.selectedListId === PLANNED_VIEW_ID && !this.isSearchMode();
+        const tasks = this.currentTasks.filter(task => this.isSearchMode() || (completed ? task.status === 'completed' : task.status !== 'completed'));
+        const renderedIds = new Set<string>();
+        const renderRows = (items: TodoTask[]) => {
+            for (const task of items) {
                 const sourceList = this.taskListByTaskId.get(task.id) || list;
-                if (sourceList) this.renderTaskRow(api, listArea, detail, sourceList, task);
-            });
-        }
-
-        const completedReady = this.isSearchMode() || this.isCompletedDataReady(list);
-        const completedHeader = listArea.createEl('button', { cls: 'todo-completed-heading' });
-        completedHeader.setAttr('type', 'button');
-        const completedChevron = completedHeader.createSpan({ cls: 'todo-completed-chevron' });
-        setIcon(completedChevron, this.showCompleted ? 'chevron-down' : 'chevron-right');
-        completedHeader.createSpan({ text: t('taskRow.completedHeading'), cls: 'todo-completed-title' });
-        if (this.showCompleted && completedReady) {
-            completedHeader.createSpan({ text: String(completedTasks.length), cls: 'todo-completed-count' });
-        }
-
-        completedHeader.onclick = () => {
-            this.showCompleted = !this.showCompleted;
-            this.selectedTaskId = null;
-            this.renderTaskList(api, list, listArea, detail);
-            if (this.showCompleted && !this.isSearchMode() && !this.isCompletedDataReady(list)) {
-                void this.loadCompletedForCurrentView(api, list, listArea, detail);
+                if (!sourceList) continue;
+                this.renderTaskRow(api, listArea, detail, sourceList, task);
+                renderedIds.add(task.id);
             }
         };
 
-        if (this.showCompleted) {
-            completedTasks.forEach((task) => {
-                const sourceList = this.taskListByTaskId.get(task.id) || list;
-                if (sourceList) this.renderTaskRow(api, listArea, detail, sourceList, task);
-            });
-
-            if (!completedReady) {
-                const loading = listArea.createDiv({ cls: 'todo-completed-loading' });
-                const spinner = loading.createSpan({ cls: 'todo-inline-spinner' });
-                setIcon(spinner, 'loader-circle');
-                loading.createSpan({ text: t('taskRow.completedLoading') });
-            } else if (completedTasks.length === 0) {
-                listArea.createEl('div', { text: t('taskRow.completedEmpty'), cls: 'todo-completed-empty' });
+        if (tasks.length === 0) {
+            const title = this.isSearchMode() ? t('search.emptyTitle')
+                : planned ? t('empty.plannedTitle') : completed ? t('empty.completedTitle') : t('empty.defaultTitle');
+            const subtitle = this.isSearchMode() ? t('search.emptySubtitle')
+                : planned ? t('empty.plannedSubtitle') : completed ? t('empty.completedSubtitle') : t('empty.defaultSubtitle');
+            const empty = listArea.createDiv({ cls: 'todo-empty' });
+            const icon = empty.createSpan({ cls: 'todo-empty-icon' });
+            setIcon(icon, 'circle-check-big');
+            empty.createEl('div', { text: title, cls: 'todo-empty-title' });
+            empty.createEl('div', { text: subtitle, cls: 'todo-empty-subtitle' });
+        } else if (planned) {
+            const groups = groupPlannedTasks(tasks);
+            const headings = { today: t('date.today'), tomorrow: t('date.tomorrow'), later: t('planned.later') };
+            for (const group of ['today', 'tomorrow', 'later'] as const) {
+                if (groups[group].length === 0) continue;
+                listArea.createDiv({ text: headings[group], cls: 'todo-task-group-heading' });
+                renderRows(groups[group]);
             }
+            if (groups.earlier.length > 0) {
+                const allOverdue = groups.earlier.every(task => isTaskOverdue(task, toLocalDateKey(new Date())));
+                const toggle = listArea.createEl('button', { cls: 'todo-earlier-toggle', attr: { type: 'button', 'aria-expanded': String(this.showEarlier) } });
+                const icon = toggle.createSpan({ cls: 'todo-earlier-chevron' });
+                setIcon(icon, this.showEarlier ? 'chevron-down' : 'chevron-right');
+                toggle.createSpan({ text: t(allOverdue ? 'planned.overdueCount' : 'planned.earlierCount', { count: groups.earlier.length }) });
+                toggle.onclick = () => {
+                    this.showEarlier = !this.showEarlier;
+                    this.renderTaskList(api, list, listArea, detail);
+                };
+                if (this.showEarlier) renderRows(groups.earlier);
+            }
+        } else if (completed && !this.isSearchMode()) {
+            for (const sourceList of this.currentLists) {
+                const items = tasks.filter(task => this.taskListByTaskId.get(task.id)?.id === sourceList.id);
+                if (items.length === 0) continue;
+                listArea.createDiv({ text: sourceList.displayName, cls: 'todo-task-group-heading' });
+                renderRows(items);
+            }
+        } else {
+            renderRows(tasks);
         }
 
         if (this.selectedTaskId) {
             const selectedTask = this.currentTasks.find((task) => task.id === this.selectedTaskId);
-            if (selectedTask) {
+            if (selectedTask && renderedIds.has(selectedTask.id)) {
                 const sourceList = this.taskListByTaskId.get(selectedTask.id) || list;
                 if (sourceList) this.selectTask(api, sourceList, listArea, detail, selectedTask);
             }
@@ -1408,28 +1110,27 @@ export class TodoView extends ItemView {
         const content = row.createSpan({ cls: 'todo-task-content' });
         content.createSpan({ text: task.title, cls: 'todo-task-title' });
 
-        if (meta) {
-            const metaLine = content.createSpan({ cls: `todo-task-meta is-${meta.kind}` });
-            const metaIcon = metaLine.createSpan({ cls: 'todo-task-meta-icon' });
-            if (isSmartViewId(this.selectedListId) || this.isSearchMode()) {
-                setIcon(metaIcon, 'list');
-                metaLine.createSpan({ text: `${list.displayName} · ${meta.text}` });
-            } else {
-                setIcon(metaIcon, meta.kind === 'completed' ? 'check' : 'calendar-days');
-                metaLine.createSpan({ text: meta.text });
-            }
+        const metadata = content.createSpan({ cls: 'todo-task-metadata' });
+        const aggregate = isSmartViewId(this.selectedListId) || this.isSearchMode();
+        if (aggregate && (this.selectedListId !== COMPLETED_VIEW_ID || this.isSearchMode())) {
+            metadata.createSpan({ text: list.displayName, cls: 'todo-task-source' });
         }
-
-        const body = taskBodyText(task.body).trim();
-        if (body) content.createSpan({ text: body, cls: 'todo-task-preview' });
-
+        const reminderOnly = task.status !== 'completed' && !task.dueDateTime?.dateTime && task.isReminderOn && !!getPlannedDate(task);
+        if (meta || reminderOnly) {
+            const metaLine = metadata.createSpan({ cls: `todo-task-meta is-${meta?.kind || 'date'}` });
+            const metaIcon = metaLine.createSpan({ cls: 'todo-task-meta-icon' });
+            setIcon(metaIcon, reminderOnly ? 'bell' : meta?.kind === 'completed' ? 'check' : 'calendar-days');
+            metaLine.createSpan({ text: reminderOnly ? t('planned.reminderDate', { date: formatShortDate(getPlannedDate(task)) }) : meta!.text });
+        }
         if (task.checklistItems && task.checklistItems.length > 0) {
-            const checkedCount = task.checklistItems.filter((item) => item.isChecked).length;
-            const steps = content.createSpan({ cls: 'todo-task-step-count' });
-            const stepsIcon = steps.createSpan({ cls: 'todo-task-step-icon' });
-            setIcon(stepsIcon, 'list-checks');
+            const checkedCount = task.checklistItems.filter(item => item.isChecked).length;
+            const steps = metadata.createSpan({ cls: 'todo-task-step-count' });
+            const icon = steps.createSpan({ cls: 'todo-task-step-icon' });
+            setIcon(icon, 'list-checks');
             steps.createSpan({ text: `${checkedCount}/${task.checklistItems.length}` });
         }
+        const body = taskBodyText(task.body).trim();
+        if (body) content.createSpan({ text: body, cls: 'todo-task-preview' });
 
         const trailing = row.createSpan({ cls: 'todo-task-trailing' });
         if (this.pendingTaskIds.has(task.id)) {
@@ -1439,10 +1140,6 @@ export class TodoView extends ItemView {
         if (task.importance === 'high') {
             const star = trailing.createSpan({ cls: 'todo-star is-important' });
             setIcon(star, 'star');
-        }
-        if (meta?.kind === 'overdue') {
-            const alert = trailing.createSpan({ cls: 'todo-overdue-indicator' });
-            setIcon(alert, 'circle-alert');
         }
 
         row.onclick = () => {
@@ -1530,7 +1227,7 @@ export class TodoView extends ItemView {
             if (!api.isCurrentSession()) return;
             this.markTaskRecentlyMutated(updatedTask.id || task.id);
             this.replaceTask(updatedTask, list.id);
-            this.selectedTaskId = updatedTask.id || task.id;
+            this.selectedTaskId = this.currentTasks.some(item => item.id === updatedTask.id) ? updatedTask.id : null;
             new Notice(successMessage);
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
@@ -1542,20 +1239,22 @@ export class TodoView extends ItemView {
 
     replaceTask(updatedTask: TodoTask, listId?: string) {
         if (listId) this.upsertTaskInCache(listId, updatedTask);
-
-        if (isSmartViewId(this.selectedListId) && !this.isSearchMode()) {
-            const today = toLocalDateKey(new Date());
-            const belongsToView = this.selectedListId === MY_DAY_VIEW_ID
-                ? isTaskDueOn(updatedTask, today)
-                : isTaskOverdue(updatedTask, today);
-            if (!belongsToView) {
-                this.currentTasks = this.currentTasks.filter((task) => task.id !== updatedTask.id);
-                this.taskListByTaskId.delete(updatedTask.id);
-                if (this.selectedTaskId === updatedTask.id) this.selectedTaskId = null;
-                return;
-            }
+        const belongs = this.isSearchMode()
+            ? updatedTask.title.toLowerCase().includes(this.searchQuery.trim().toLowerCase())
+            : this.selectedListId === PLANNED_VIEW_ID ? isPlannedTask(updatedTask)
+            : this.selectedListId === COMPLETED_VIEW_ID ? updatedTask.status === 'completed'
+            : !listId || listId === this.selectedListId;
+        if (!belongs) {
+            this.currentTasks = this.currentTasks.filter(task => task.id !== updatedTask.id);
+            this.taskListByTaskId.delete(updatedTask.id);
+            if (this.selectedTaskId === updatedTask.id) this.selectedTaskId = null;
+            return;
         }
-        this.currentTasks = this.currentTasks.map((task) => task.id === updatedTask.id ? updatedTask : task);
+        const list = this.currentLists.find(item => item.id === listId);
+        if (list) this.taskListByTaskId.set(updatedTask.id, list);
+        this.currentTasks = this.currentTasks.some(task => task.id === updatedTask.id)
+            ? this.currentTasks.map(task => task.id === updatedTask.id ? updatedTask : task)
+            : [updatedTask, ...this.currentTasks];
     }
 }
 
