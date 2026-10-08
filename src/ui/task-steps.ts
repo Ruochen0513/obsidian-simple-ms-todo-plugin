@@ -213,6 +213,14 @@ export function renderTaskSteps(view: TodoView, api: MsTodoApi, detail: HTMLElem
     stepInput.setAttr('maxlength', '255');
     stepInput.setAttr('aria-label', t('taskDetail.addStepPlaceholder'));
 
+    if (checklistItems.length === 0) {
+        const empty = stepList.createDiv({ cls: 'todo-step-empty' });
+        const icon = empty.createSpan({ cls: 'todo-step-empty-icon', attr: { 'aria-hidden': 'true' } });
+        setIcon(icon, 'list-checks');
+        empty.createSpan({ text: t('taskDetail.emptyStepsTitle'), cls: 'todo-step-empty-title' });
+        empty.createSpan({ text: t('taskDetail.emptyStepsHint'), cls: 'todo-step-empty-hint' });
+    }
+
     const addStep = () => {
         const name = stepInput.value.trim();
         if (!name) {

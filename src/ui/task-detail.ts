@@ -35,13 +35,20 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
         void view.toggleTaskCompletionOptimistically(api, list, listArea, detail, task);
     };
 
-    const titleInput = header.createEl('textarea', { cls: 'todo-title-input' });
+    const titleInput = header.createEl('input', { type: 'text', cls: 'todo-title-input' });
     titleInput.value = task.title;
-    titleInput.rows = 1;
+    const originalTitle = titleInput.value.trim();
+    titleInput.setAttr('title', task.title);
     titleInput.setAttr('aria-label', t('taskDetail.taskName'));
+    titleInput.onkeydown = (event) => {
+        if (event.key === 'Enter' && !event.isComposing) {
+            event.preventDefault();
+            titleInput.blur();
+        }
+    };
     titleInput.onblur = () => {
         const nextTitle = titleInput.value.trim();
-        if (!nextTitle || nextTitle === task.title) return;
+        if (!nextTitle || nextTitle === originalTitle) return;
         void view.saveTaskChange(
             api,
             list,

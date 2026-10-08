@@ -114,6 +114,8 @@ export const zhCn: Record<TranslationKey, string> = {
     'taskDetail.deleteStepFailed': '删除步骤失败',
     'taskDetail.addStepFailed': '添加步骤失败',
     'taskDetail.addStepPlaceholder': '添加步骤',
+    'taskDetail.emptyStepsTitle': '还没有步骤',
+    'taskDetail.emptyStepsHint': '把任务拆小，一步步完成',
     'taskDetail.dueDateLabel': '截止日期',
     'taskDetail.dueDateUpdated': '截止日期已更新',
     'taskDetail.dueDateCleared': '截止日期已清除',

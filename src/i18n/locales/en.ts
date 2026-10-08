@@ -112,6 +112,8 @@ export const en = {
     'taskDetail.deleteStepFailed': 'Failed to delete step',
     'taskDetail.addStepFailed': 'Failed to add step',
     'taskDetail.addStepPlaceholder': 'Add step',
+    'taskDetail.emptyStepsTitle': 'No steps yet',
+    'taskDetail.emptyStepsHint': 'Break the task into smaller actions',
     'taskDetail.dueDateLabel': 'Due date',
     'taskDetail.dueDateUpdated': 'Due date updated',
     'taskDetail.dueDateCleared': 'Due date cleared',
