@@ -209,8 +209,6 @@ export class TodoView extends ItemView {
 
         const header = app.createDiv({ cls: 'todo-header' });
         const brand = header.createDiv({ cls: 'todo-brand' });
-        const brandIcon = brand.createSpan({ cls: 'todo-brand-icon' });
-        setIcon(brandIcon, 'check-check');
         brand.createSpan({ text: 'Microsoft To Do', cls: 'todo-brand-text' });
 
         const selectedList = this.getSelectedList(lists);
@@ -1080,8 +1078,6 @@ export class TodoView extends ItemView {
             const subtitle = this.isSearchMode() ? t('search.emptySubtitle')
                 : planned ? t('empty.plannedSubtitle') : completed ? t('empty.completedSubtitle') : t('empty.defaultSubtitle');
             const empty = listArea.createDiv({ cls: 'todo-empty' });
-            const icon = empty.createSpan({ cls: 'todo-empty-icon' });
-            setIcon(icon, 'circle-check-big');
             empty.createEl('div', { text: title, cls: 'todo-empty-title' });
             empty.createEl('div', { text: subtitle, cls: 'todo-empty-subtitle' });
         } else if (planned) {

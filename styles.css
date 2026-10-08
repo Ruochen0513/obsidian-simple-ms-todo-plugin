@@ -126,20 +126,6 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 9px;
-}
-
-.todo-brand-icon {
-    width: 22px;
-    height: 22px;
-    flex: 0 0 auto;
-    color: var(--mstodo-accent);
-}
-
-.todo-brand-icon svg {
-    width: 22px;
-    height: 22px;
-    stroke-width: 2.4;
 }
 
 .todo-brand-text {
@@ -490,19 +476,6 @@
     justify-content: center;
     gap: 6px;
     text-align: center;
-}
-
-.todo-empty-icon {
-    width: 28px;
-    height: 28px;
-    margin-bottom: 4px;
-    color: var(--mstodo-accent);
-    opacity: 0.72;
-}
-
-.todo-empty-icon svg {
-    width: 28px;
-    height: 28px;
 }
 
 .todo-empty-title {
@@ -1167,10 +1140,6 @@ body.theme-dark .todo-signed-out {
 @container (max-width: 330px) {
     .todo-header {
         padding-inline: 9px;
-    }
-
-    .todo-brand {
-        gap: 7px;
     }
 
     .todo-brand-text {
