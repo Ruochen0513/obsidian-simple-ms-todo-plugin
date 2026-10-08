@@ -1,7 +1,7 @@
 import { App, Modal, Notice } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
-import { toLocalDateKey } from './todo-view';
+import { toLocalDateKey } from '../utils/task-dates';
 import { t } from '../i18n';
 
 export class QuickCaptureModal extends Modal {
@@ -97,7 +97,7 @@ export class QuickCaptureModal extends Modal {
             }
 
             this.plugin.getTodoView()?.handleExternalTaskCreated(task, list, dueToday);
-            new Notice(t('notices.taskAddedTo', { listName: list.displayName }) + (dueToday ? t('notices.taskAddedDueTodaySuffix') : ''));
+            new Notice(t(dueToday ? 'notices.taskAddedDueToday' : 'notices.taskAddedTo', { listName: list.displayName }));
             this.close();
         } catch (error) {
             if (!this.api.isCurrentSession()) {

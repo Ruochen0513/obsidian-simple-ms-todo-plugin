@@ -11,6 +11,12 @@ const source = buildSync({
             export { QuickCaptureModal } from './src/ui/quick-capture-modal';
             export { buildMarkdownDocument } from './src/sync/markdown';
             export { DEFAULT_SETTINGS } from './src/settings';
+            export { readSettings } from './src/settings';
+            export { AuthSession, TOKEN_SECRET_ID } from './src/auth/session';
+            export { t, setLocale, getLocale, formatTimestamp } from './src/i18n';
+            export { en } from './src/i18n/locales/en';
+            export { zhCn } from './src/i18n/locales/zh-cn';
+            export { formatDisplayDate, formatShortDate } from './src/utils/task-dates';
         `,
         resolveDir: path.resolve(__dirname, '..'),
         loader: 'ts',
@@ -66,10 +72,16 @@ function deferred() {
 const list = { id: 'list-a', displayName: 'Test list', wellknownListName: 'defaultList' };
 const task = { id: 'task-a', title: 'Needle', status: 'notStarted', body: { contentType: 'text', content: 'Original note' } };
 
-function setup() {
+function setup(options = {}) {
     const timers = new Map();
     const notices = [];
     const leaves = [];
+    const secrets = new Map();
+    const storage = {
+        getSecret: id => secrets.get(id) || null,
+        setSecret: (id, value) => { secrets.set(id, value); },
+    };
+    const host = { language: options.language || 'en' };
     let nextTimer = 0;
     const network = { request: async () => { throw new Error('Unexpected request'); } };
     class Component {
@@ -77,12 +89,18 @@ function setup() {
         registerDomEvent() {}
     }
     const obsidian = {
-        Plugin: class extends Component { async saveData(data) { this.saved = JSON.parse(JSON.stringify(data)); } },
+        Plugin: class extends Component {
+            commands = new Map();
+            async loadData() { return options.data || {}; }
+            async saveData(data) { this.saved = JSON.parse(JSON.stringify(data)); }
+            addCommand(command) { this.commands.set(command.id, command); return command; }
+            removeCommand(id) { this.commands.delete(id); }
+        },
         ItemView: class extends Component { constructor() { super(); this.contentEl = new Element(); } },
         Modal: class { close() { this.closed = true; } },
         PluginSettingTab: class {}, AbstractInputSuggest: class {},
         Notice: class { constructor(message) { notices.push(message); } },
-        getLanguage: () => 'en', setIcon() {}, normalizePath: value => value,
+        getLanguage: () => host.language, setIcon() {}, normalizePath: value => value,
         requestUrl: (...args) => network.request(...args),
     };
     const context = {
@@ -90,6 +108,7 @@ function setup() {
         require: name => { if (name !== 'obsidian') throw new Error(name); return obsidian; },
         console: { warn() {}, error() {} },
         window: {
+            open() {},
             setTimeout: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
             clearTimeout: id => timers.delete(id),
         },
@@ -98,8 +117,13 @@ function setup() {
     runInNewContext(source, context);
     const exports = context.module.exports;
     const plugin = new exports.MsTodoPlugin();
-    plugin.settings = { ...exports.DEFAULT_SETTINGS, accessToken: 'test-access', refreshToken: 'test-refresh', tokenExpiresAt: Date.now() + 3600000 };
-    plugin.app = { workspace: { getLeavesOfType: () => leaves } };
+    plugin.settings = { ...exports.DEFAULT_SETTINGS };
+    plugin.app = { workspace: { getLeavesOfType: () => leaves }, secretStorage: storage };
+    plugin.session = new exports.AuthSession(storage);
+    if (options.signedIn !== false) plugin.session.restore('test-refresh');
+    plugin.session.oauth.generateCodeVerifier = () => 'test-verifier';
+    plugin.session.oauth.getAuthUrl = async () => 'https://example.test/login';
+    plugin.session.oauth.refreshAccessToken = async () => ({ access_token: 'test-access', refresh_token: 'test-refresh', expires_in: 3600 });
     const view = new exports.TodoView({}, plugin);
     leaves.push({ view });
     view.currentLists = [list];
@@ -109,7 +133,7 @@ function setup() {
     view.mainListArea = new Element();
     view.mainDetail = new Element();
     const api = new exports.MsTodoApi(plugin);
-    return { ...exports, plugin, view, api, timers, notices, network };
+    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host };
 }
 
 module.exports = { setup, deferred, Element, list, task };

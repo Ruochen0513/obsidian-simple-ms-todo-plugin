@@ -1,5 +1,5 @@
 import type { TodoList, TodoTask } from '../api/ms-todo-api';
-import { t } from '../i18n';
+import { t, formatTimestamp } from '../i18n';
 import { taskBodyText } from '../utils/task-body';
 
 interface ListWithTasks {
@@ -11,7 +11,7 @@ export function buildMarkdownDocument(listsWithTasks: ListWithTasks[]): string {
     const lines: string[] = [
         '# Microsoft To Do',
         '',
-        t('markdownBlock.syncTimestamp', { date: new Date().toLocaleString() }),
+        t('markdownBlock.syncTimestamp', { date: formatTimestamp(new Date()) }),
         '',
     ];
 

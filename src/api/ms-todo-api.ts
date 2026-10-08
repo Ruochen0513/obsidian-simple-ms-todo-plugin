@@ -1,8 +1,6 @@
-import { Notice, normalizePath, requestUrl } from 'obsidian';
-import { AuthManager } from '../auth';
+import { normalizePath, requestUrl } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { buildMarkdownDocument } from '../sync/markdown';
-import { t } from '../i18n';
 
 const GRAPH_ENDPOINT = 'https://graph.microsoft.com/v1.0';
 
@@ -67,56 +65,23 @@ interface GraphCollection<T> {
 
 export class MsTodoApi {
     plugin: MsTodoPlugin;
-    auth: AuthManager;
-    private refreshPromise: Promise<string> | null = null;
     private readonly session: number;
 
     constructor(plugin: MsTodoPlugin) {
         this.plugin = plugin;
-        this.auth = new AuthManager();
-        this.session = plugin.sessionVersion;
+        this.session = plugin.session.version;
     }
 
     isCurrentSession(): boolean {
-        return this.session === this.plugin.sessionVersion && !!this.plugin.settings.accessToken;
+        return this.plugin.session.isCurrent(this.session);
     }
 
     assertCurrentSession() {
-        if (!this.isCurrentSession()) throw new Error(t('apiError.noSignInInfo'));
-    }
-
-    async getValidToken(): Promise<string> {
-        this.assertCurrentSession();
-        const now = Date.now();
-        if (this.plugin.settings.tokenExpiresAt - now < 5 * 60 * 1000) {
-            if (this.plugin.settings.refreshToken) {
-                if (!this.refreshPromise) {
-                    this.refreshPromise = this.refreshTokenOnce()
-                        .finally(() => { this.refreshPromise = null; });
-                }
-                return this.refreshPromise;
-            }
-            throw new Error(t('apiError.noSignInInfo'));
-        }
-        return this.plugin.settings.accessToken;
-    }
-
-    private async refreshTokenOnce(): Promise<string> {
-        try {
-            console.warn(t('apiError.tokenRefreshing'));
-            const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
-            this.assertCurrentSession();
-            await this.plugin.saveTokens(newTokens, this.session);
-            this.assertCurrentSession();
-            return newTokens.access_token;
-        } catch (error) {
-            if (this.isCurrentSession()) new Notice(t('apiError.signInExpired'));
-            throw error;
-        }
+        this.plugin.session.assertCurrent(this.session);
     }
 
     async request<T>(url: string, method: string = 'GET', body?: Record<string, unknown>): Promise<T> {
-        const token = await this.getValidToken();
+        const token = await this.plugin.session.getValidToken(this.session);
         this.assertCurrentSession();
         const response = await requestUrl({
             url,

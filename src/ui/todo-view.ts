@@ -1,8 +1,13 @@
-import { App, ItemView, Menu, Modal, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
 import type MsTodoPlugin from '../main';
-import { MsTodoApi, ChecklistItem, TodoList, TodoTask } from '../api/ms-todo-api';
+import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
+import { syncTasksToMarkdown } from '../commands';
 import { t } from '../i18n';
 import { taskBodyText } from '../utils/task-body';
+import { buildTaskMeta, toLocalDateKey, dateToInputValue, isTaskDueOn, isTaskOverdue } from '../utils/task-dates';
+import type { TaskCacheEntry, TaskCacheSnapshot } from '../sync/task-cache';
+import { DeleteConfirmModal, CreateListModal } from './task-modals';
+import { renderTaskDetail } from './task-detail';
 
 export const VIEW_TYPE_TODO = 'ms-todo-view';
 const MY_DAY_VIEW_ID = '__my-day__';
@@ -10,27 +15,6 @@ const OVERDUE_VIEW_ID = '__overdue__';
 
 function isSmartViewId(id: string | null): boolean {
     return id === MY_DAY_VIEW_ID || id === OVERDUE_VIEW_ID;
-}
-
-type MetaKind = 'today' | 'tomorrow' | 'overdue' | 'date' | 'completed';
-
-interface TaskMeta {
-    text: string;
-    kind: MetaKind;
-}
-
-export interface TaskCacheEntry {
-    tasks: TodoTask[];
-    allLoaded: boolean;
-    updatedAt: number;
-    loadingAll?: Promise<TodoTask[]>;
-}
-
-export interface TaskCacheSnapshot {
-    version: 1;
-    savedAt: number;
-    lists: TodoList[];
-    entries: Record<string, { tasks: TodoTask[]; allLoaded: boolean; updatedAt: number }>;
 }
 
 const TASK_CACHE_TTL_MS = 30_000;
@@ -46,6 +30,7 @@ export class TodoView extends ItemView {
     taskListByTaskId = new Map<string, TodoList>();
     taskCache = new Map<string, TaskCacheEntry>();
     pendingTaskIds = new Set<string>();
+    pendingChecklistItemIds = new Set<string>();
     recentlyMutatedTaskIds = new Set<string>();
     mainListArea: HTMLElement | null = null;
     mainDetail: HTMLElement | null = null;
@@ -62,7 +47,7 @@ export class TodoView extends ItemView {
     constructor(leaf: WorkspaceLeaf, plugin: MsTodoPlugin) {
         super(leaf);
         this.plugin = plugin;
-        this.cacheSession = plugin.sessionVersion;
+        this.cacheSession = plugin.session.version;
     }
 
     getViewType() { return VIEW_TYPE_TODO; }
@@ -79,7 +64,8 @@ export class TodoView extends ItemView {
     }
 
     async render() {
-        this.cacheSession = this.plugin.sessionVersion;
+        const accountChanged = this.cacheSession !== this.plugin.session.version;
+        this.cacheSession = this.plugin.session.version;
         this.clearSearchState();
         const token = this.viewTransitionToken;
         this.searchInputEl = null;
@@ -89,12 +75,13 @@ export class TodoView extends ItemView {
         container.empty();
         container.addClass('ms-todo-container');
 
-        if (!this.plugin.settings.accessToken) {
+        if (!this.plugin.session.signedIn || accountChanged) {
             if (this.cachePersistTimer !== null) window.clearTimeout(this.cachePersistTimer);
             this.cachePersistTimer = null;
             this.taskCache.clear();
             this.noteDrafts.clear();
             this.pendingTaskIds.clear();
+            this.pendingChecklistItemIds.clear();
             this.recentlyMutatedTaskIds.clear();
             this.selectedListId = MY_DAY_VIEW_ID;
             this.selectedTaskId = null;
@@ -105,8 +92,10 @@ export class TodoView extends ItemView {
             this.mainListArea = null;
             this.mainDetail = null;
             this.currentRenderList = null;
-            this.renderSignedOut(container);
-            return;
+            if (!this.plugin.session.signedIn) {
+                this.renderSignedOut(container);
+                return;
+            }
         }
 
         const snapshot = this.plugin.taskCacheSnapshot;
@@ -559,7 +548,7 @@ export class TodoView extends ItemView {
                 item
                     .setTitle(t('sidebar.syncToNote'))
                     .setIcon('file-down')
-                    .onClick(() => { void this.plugin.syncTasksToMarkdown(); });
+                    .onClick(() => { void syncTasksToMarkdown(this.plugin); });
             });
         }
 
@@ -635,9 +624,7 @@ export class TodoView extends ItemView {
         const confirmed = await new Promise<boolean>((resolve) => {
             new DeleteConfirmModal(this.app, {
                 title: t('modal.deleteListTitle'),
-                before: t('modal.deleteListBefore'),
-                bold: list.displayName,
-                after: t('modal.deleteListAfter'),
+                message: t('modal.deleteListMessage', { listName: list.displayName }),
             }, resolve).open();
         });
         if (!confirmed || !api.isCurrentSession()) return;
@@ -699,7 +686,7 @@ export class TodoView extends ItemView {
     }
 
     scheduleCachePersist() {
-        if (!this.plugin.settings.accessToken) return;
+        if (!this.plugin.session.signedIn) return;
         if (this.cachePersistTimer !== null) window.clearTimeout(this.cachePersistTimer);
         this.cachePersistTimer = window.setTimeout(() => {
             this.cachePersistTimer = null;
@@ -715,7 +702,7 @@ export class TodoView extends ItemView {
     }
 
     async persistTaskCache() {
-        if (!this.plugin.settings.accessToken || this.cacheSession !== this.plugin.sessionVersion) return;
+        if (!this.plugin.session.signedIn || this.cacheSession !== this.plugin.session.version) return;
         const entries: TaskCacheSnapshot['entries'] = {};
         this.taskCache.forEach((entry, listId) => {
             if (entry.tasks.length === 0 && !entry.allLoaded) return;
@@ -736,7 +723,7 @@ export class TodoView extends ItemView {
         try {
             await this.plugin.saveSettings();
         } catch (error) {
-            console.warn('保存任务缓存失败', error);
+            console.warn('Microsoft To Do: failed to save task cache', error);
         }
     }
 
@@ -780,7 +767,7 @@ export class TodoView extends ItemView {
                 void this.render();
             }
         } catch (error) {
-            console.warn('后台刷新清单失败', error);
+            console.warn('Microsoft To Do: failed to refresh lists in background', error);
         }
     }
 
@@ -931,7 +918,7 @@ export class TodoView extends ItemView {
             if (!api.isCurrentSession() || token !== this.viewTransitionToken || this.isSearchMode()) return;
             if (this.selectedListId === list.id) this.currentTasks = tasks;
         } catch (error) {
-            console.warn('预加载已完成任务失败', error);
+            console.warn('Microsoft To Do: failed to preload completed tasks', error);
         }
     }
 
@@ -951,7 +938,7 @@ export class TodoView extends ItemView {
                 this.renderTaskList(api, list, listArea, detail);
             }
         } catch (error) {
-            console.warn('后台刷新清单失败', error);
+            console.warn('Microsoft To Do: failed to refresh lists in background', error);
         }
     }
 
@@ -1137,7 +1124,7 @@ export class TodoView extends ItemView {
                 this.setTaskCache(list.id, this.mergeServerTasksWithLocal(list.id, serverTasks), includeCompleted);
             }));
         } catch (error) {
-            console.warn('后台刷新智能视图失败', error);
+            console.warn('Microsoft To Do: failed to refresh smart view in background', error);
             return;
         }
 
@@ -1469,309 +1456,7 @@ export class TodoView extends ItemView {
         listArea.querySelectorAll('.todo-task-row').forEach((row) => {
             row.toggleClass('is-selected', row.getAttr('data-task-id') === task.id);
         });
-        this.renderTaskDetail(api, detail, listArea, list, task);
-    }
-
-    renderTaskDetail(api: MsTodoApi, detail: HTMLElement, listArea: HTMLElement, list: TodoList, task: TodoTask) {
-        detail.empty();
-        detail.addClass('is-open');
-
-        const topbar = detail.createDiv({ cls: 'todo-detail-topbar' });
-        const closeBtn = topbar.createEl('button', { cls: 'todo-icon-button todo-detail-close' });
-        closeBtn.setAttr('type', 'button');
-        closeBtn.setAttr('aria-label', t('taskDetail.backAria'));
-        setIcon(closeBtn, 'arrow-left');
-        topbar.createSpan({ text: t('taskDetail.title'), cls: 'todo-detail-topbar-title' });
-        const topbarSpacer = topbar.createSpan({ cls: 'todo-detail-topbar-spacer' });
-        topbarSpacer.setAttr('aria-hidden', 'true');
-
-        closeBtn.onclick = () => {
-            this.selectedTaskId = null;
-            detail.empty();
-            detail.removeClass('is-open');
-            listArea.querySelectorAll('.todo-task-row').forEach((row) => row.removeClass('is-selected'));
-        };
-
-        const header = detail.createDiv({ cls: 'todo-detail-header' });
-        const complete = header.createEl('input', { type: 'checkbox', cls: 'todo-task-checkbox' });
-        complete.checked = task.status === 'completed';
-        complete.onchange = () => {
-            void this.toggleTaskCompletionOptimistically(api, list, listArea, detail, task);
-        };
-
-        const titleInput = header.createEl('textarea', { cls: 'todo-title-input' });
-        titleInput.value = task.title;
-        titleInput.rows = 2;
-        titleInput.onblur = () => {
-            const nextTitle = titleInput.value.trim();
-            if (!nextTitle || nextTitle === task.title) return;
-            void this.saveTaskChange(
-                api,
-                list,
-                listArea,
-                detail,
-                task,
-                () => api.updateTask(list.id, task.id, { title: nextTitle }),
-                t('taskDetail.titleUpdated'),
-            );
-        };
-
-        const starBtn = header.createEl('button', { cls: 'todo-star-button' });
-        starBtn.setAttr('type', 'button');
-        starBtn.setAttr('aria-label', task.importance === 'high' ? t('taskDetail.removeImportantAria') : t('taskDetail.markImportantAria'));
-        setIcon(starBtn, 'star');
-        if (task.importance === 'high') starBtn.addClass('is-important');
-        starBtn.onclick = () => {
-            void this.saveTaskChange(
-                api,
-                list,
-                listArea,
-                detail,
-                task,
-                () => api.toggleImportant(list.id, task),
-                task.importance === 'high' ? t('taskDetail.removedFromImportant') : t('taskDetail.markedAsImportant'),
-            );
-        };
-
-        const stepsCard = detail.createDiv({ cls: 'todo-detail-card' });
-        const stepsLabel = stepsCard.createDiv({ cls: 'todo-detail-card-label' });
-        const stepsLabelIcon = stepsLabel.createSpan();
-        setIcon(stepsLabelIcon, 'list-checks');
-        stepsLabel.createSpan({ text: t('taskDetail.stepsLabel') });
-        const checklistItems = task.checklistItems || [];
-        if (checklistItems.length > 0) {
-            const doneCount = checklistItems.filter((item) => item.isChecked).length;
-            stepsLabel.createSpan({ text: `${doneCount}/${checklistItems.length}`, cls: 'todo-detail-card-count' });
-        }
-
-        const refocusStepInput = () => {
-            window.setTimeout(() => {
-                const active = document.activeElement;
-                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-                const nextInput = detail.querySelector('.todo-step-add-input');
-                if (nextInput instanceof HTMLInputElement) nextInput.focus();
-            }, 0);
-        };
-
-        const runChecklistMutation = (
-            op: () => Promise<unknown>,
-            applyLocal: () => void,
-            rollback: () => void,
-            failMessage: string,
-            afterSuccess?: () => void,
-        ) => {
-            if (!api.isCurrentSession()) return;
-            applyLocal();
-            this.renderTaskList(api, list, listArea, detail);
-            void (async () => {
-                try {
-                    await op();
-                    if (!api.isCurrentSession()) return;
-                    this.markTaskRecentlyMutated(task.id);
-                    this.scheduleCachePersist();
-                    if (afterSuccess) {
-                        afterSuccess();
-                        this.renderTaskList(api, list, listArea, detail);
-                        refocusStepInput();
-                    }
-                } catch (error) {
-                    if (!api.isCurrentSession()) return;
-                    rollback();
-                    this.renderTaskList(api, list, listArea, detail);
-                    new Notice(failMessage);
-                    console.error(error);
-                }
-            })();
-        };
-
-        checklistItems.forEach((step) => {
-            const stepRow = stepsCard.createDiv({ cls: 'todo-step-row' });
-            const checked = stepRow.createEl('input', { type: 'checkbox' });
-            checked.checked = step.isChecked;
-            checked.setAttr('aria-label', step.isChecked ? t('taskDetail.reopenStepAria', { stepName: step.displayName }) : t('taskDetail.completeStepAria', { stepName: step.displayName }));
-            const stepLabel = stepRow.createSpan({ text: step.displayName, cls: 'todo-step-label' });
-            if (step.isChecked) stepLabel.addClass('is-checked');
-            const removeBtn = stepRow.createEl('button', { cls: 'todo-step-remove' });
-            removeBtn.setAttr('type', 'button');
-            removeBtn.setAttr('aria-label', t('taskDetail.deleteStepAria', { stepName: step.displayName }));
-            const removeIcon = removeBtn.createSpan();
-            setIcon(removeIcon, 'x');
-
-            checked.onchange = () => {
-                const nextChecked = checked.checked;
-                const previousItems = task.checklistItems ? [...task.checklistItems] : [];
-                runChecklistMutation(
-                    () => api.updateChecklistItem(list.id, task.id, step.id, { isChecked: nextChecked }),
-                    () => {
-                        task.checklistItems = previousItems.map((item) =>
-                            item.id === step.id ? { ...item, isChecked: nextChecked } : item);
-                    },
-                    () => { task.checklistItems = previousItems; },
-                    t('taskDetail.updateStepFailed'),
-                );
-            };
-
-            removeBtn.onclick = () => {
-                const previousItems = task.checklistItems ? [...task.checklistItems] : [];
-                runChecklistMutation(
-                    () => api.deleteChecklistItem(list.id, task.id, step.id),
-                    () => {
-                        task.checklistItems = previousItems.filter((item) => item.id !== step.id);
-                    },
-                    () => { task.checklistItems = previousItems; },
-                    t('taskDetail.deleteStepFailed'),
-                );
-            };
-        });
-
-        const stepComposer = stepsCard.createDiv({ cls: 'todo-step-add' });
-        const stepAddIcon = stepComposer.createSpan({ cls: 'todo-step-add-icon' });
-        setIcon(stepAddIcon, 'plus');
-        const stepInput = stepComposer.createEl('input', { cls: 'todo-step-add-input' });
-        stepInput.setAttr('type', 'text');
-        stepInput.setAttr('placeholder', t('taskDetail.addStepPlaceholder'));
-        stepInput.setAttr('maxlength', '255');
-        stepInput.setAttr('aria-label', t('taskDetail.addStepPlaceholder'));
-
-        const addStep = () => {
-            const name = stepInput.value.trim();
-            if (!name) {
-                stepInput.focus();
-                return;
-            }
-            const tempId = `local-step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            const previousItems = task.checklistItems ? [...task.checklistItems] : [];
-            let createdItem: ChecklistItem | null = null;
-            runChecklistMutation(
-                async () => {
-                    createdItem = await api.createChecklistItem(list.id, task.id, name);
-                },
-                () => {
-                    task.checklistItems = [...previousItems, { id: tempId, displayName: name, isChecked: false }];
-                },
-                () => { task.checklistItems = previousItems; },
-                t('taskDetail.addStepFailed'),
-                () => {
-                    if (createdItem) {
-                        task.checklistItems = (task.checklistItems || []).map((item) =>
-                            item.id === tempId ? createdItem as ChecklistItem : item);
-                    }
-                },
-            );
-            refocusStepInput();
-        };
-
-        stepInput.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                addStep();
-            }
-        });
-
-        const dateCard = detail.createDiv({ cls: 'todo-detail-card' });
-        const dateLabel = dateCard.createDiv({ cls: 'todo-detail-card-label' });
-        const dateLabelIcon = dateLabel.createSpan();
-        setIcon(dateLabelIcon, 'calendar-days');
-        dateLabel.createSpan({ text: t('taskDetail.dueDateLabel') });
-        const dateInput = dateCard.createEl('input', { type: 'date' });
-        dateInput.value = dateToInputValue(task.dueDateTime?.dateTime || '');
-        dateInput.onchange = () => {
-            void this.saveTaskChange(
-                api,
-                list,
-                listArea,
-                detail,
-                task,
-                () => api.updateTaskDueDate(list.id, task.id, dateInput.value),
-                dateInput.value ? t('taskDetail.dueDateUpdated') : t('taskDetail.dueDateCleared'),
-            );
-        };
-        if (task.dueDateTime?.dateTime) {
-            const clearDate = dateCard.createEl('button', { text: t('taskDetail.clearDate'), cls: 'todo-link-button' });
-            clearDate.onclick = () => {
-                void this.saveTaskChange(
-                    api,
-                    list,
-                    listArea,
-                    detail,
-                    task,
-                    () => api.updateTaskDueDate(list.id, task.id, ''),
-                    t('taskDetail.dueDateCleared'),
-                );
-            };
-        }
-
-        const chipsRow = dateCard.createDiv({ cls: 'todo-date-chips' });
-        const currentDue = dateToInputValue(task.dueDateTime?.dateTime || '');
-        const dateChips: Array<{ label: string; days: number }> = [
-            { label: t('taskDetail.chipToday'), days: 0 },
-            { label: t('taskDetail.chipTomorrow'), days: 1 },
-            { label: t('taskDetail.chipNextWeek'), days: 7 },
-        ];
-        dateChips.forEach((chip) => {
-            const chipDate = new Date();
-            chipDate.setDate(chipDate.getDate() + chip.days);
-            const chipKey = toLocalDateKey(chipDate);
-            const chipBtn = chipsRow.createEl('button', { text: chip.label, cls: 'todo-date-chip' });
-            chipBtn.setAttr('type', 'button');
-            chipBtn.setAttr('aria-label', t('taskDetail.setDueDateAria', { label: chip.label }));
-            if (currentDue === chipKey) chipBtn.addClass('is-active');
-            chipBtn.onclick = () => {
-                void this.saveTaskChange(
-                    api,
-                    list,
-                    listArea,
-                    detail,
-                    task,
-                    () => api.updateTaskDueDate(list.id, task.id, chipKey),
-                    t('taskDetail.dueDateSetTo', { label: chip.label }),
-                );
-            };
-        });
-
-        const noteCard = detail.createDiv({ cls: 'todo-detail-card' });
-        const noteLabel = noteCard.createDiv({ cls: 'todo-detail-card-label' });
-        const noteLabelIcon = noteLabel.createSpan();
-        setIcon(noteLabelIcon, 'notebook-pen');
-        noteLabel.createSpan({ text: t('taskDetail.notesLabel') });
-        const noteInput = noteCard.createEl('textarea', { cls: 'todo-note-input', placeholder: t('taskDetail.notePlaceholder') });
-        noteInput.value = this.noteDrafts.get(task.id) ?? taskBodyText(task.body);
-        noteInput.addEventListener('input', () => {
-            this.noteDrafts.set(task.id, noteInput.value);
-        });
-        noteInput.rows = 8;
-        const saveNote = noteCard.createEl('button', { text: t('taskDetail.saveNote'), cls: 'todo-primary-button todo-save-note' });
-        saveNote.onclick = () => {
-            const content = noteInput.value;
-            void this.saveTaskChange(
-                api,
-                list,
-                listArea,
-                detail,
-                task,
-                async () => {
-                    const updated = await api.updateTaskBody(list.id, task.id, content);
-                    if (api.isCurrentSession() && this.noteDrafts.get(task.id) === content) this.noteDrafts.delete(task.id);
-                    return updated;
-                },
-                t('taskDetail.noteUpdated'),
-            );
-        };
-
-        const footer = detail.createDiv({ cls: 'todo-detail-footer' });
-        const footerMeta = footer.createDiv({ cls: 'todo-detail-footer-meta' });
-        if (task.createdDateTime) footerMeta.createSpan({ text: t('taskDetail.createdAt', { date: formatDisplayDate(task.createdDateTime) }) });
-        if (task.completedDateTime?.dateTime) footerMeta.createSpan({ text: t('taskDetail.completedAt', { date: formatDisplayDate(task.completedDateTime.dateTime) }) });
-
-        const deleteButton = footer.createEl('button', { cls: 'todo-delete-task-button' });
-        deleteButton.setAttr('type', 'button');
-        deleteButton.setAttr('aria-label', t('taskDetail.deleteTaskAria', { taskTitle: task.title }));
-        const deleteIcon = deleteButton.createSpan({ cls: 'todo-delete-task-icon' });
-        setIcon(deleteIcon, 'trash-2');
-        deleteButton.createSpan({ text: t('taskDetail.deleteTask') });
-        deleteButton.onclick = () => {
-            void this.confirmAndDeleteTask(api, list, listArea, detail, task);
-        };
+        renderTaskDetail(this, api, detail, listArea, list, task, this.noteDrafts);
     }
 
     async confirmAndDeleteTask(
@@ -1786,9 +1471,7 @@ export class TodoView extends ItemView {
         const confirmed = await new Promise<boolean>((resolve) => {
             new DeleteConfirmModal(this.app, {
                 title: t('modal.deleteTaskTitle'),
-                before: t('modal.deleteTaskBefore'),
-                bold: task.title,
-                after: t('modal.deleteTaskAfter'),
+                message: t('modal.deleteTaskMessage', { taskTitle: task.title }),
             }, resolve).open();
         });
         if (!confirmed || !api.isCurrentSession()) return;
@@ -1878,195 +1561,4 @@ export class TodoView extends ItemView {
 
 function wait(ms: number): Promise<void> {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-
-interface DeleteConfirmOptions {
-    title: string;
-    before: string;
-    bold: string;
-    after: string;
-    confirmText?: string;
-}
-
-class DeleteConfirmModal extends Modal {
-    private options: DeleteConfirmOptions;
-    private resolve: (confirmed: boolean) => void;
-    private settled = false;
-
-    constructor(app: App, options: DeleteConfirmOptions, resolve: (confirmed: boolean) => void) {
-        super(app);
-        this.options = options;
-        this.resolve = resolve;
-    }
-
-    onOpen() {
-        this.titleEl.setText(this.options.title);
-        this.contentEl.addClass('todo-delete-confirm-modal');
-
-        const message = this.contentEl.createEl('p');
-        message.createSpan({ text: this.options.before });
-        message.createEl('strong', { text: this.options.bold });
-        message.createSpan({ text: this.options.after });
-
-        const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
-        const cancel = actions.createEl('button', { text: t('common.cancel') });
-        cancel.setAttr('type', 'button');
-        cancel.onclick = () => this.finish(false);
-
-        const confirm = actions.createEl('button', {
-            text: this.options.confirmText ?? t('common.delete'),
-            cls: 'mod-warning todo-delete-confirm-button',
-        });
-        confirm.setAttr('type', 'button');
-        confirm.onclick = () => this.finish(true);
-    }
-
-    onClose() {
-        this.contentEl.empty();
-        if (!this.settled) {
-            this.settled = true;
-            this.resolve(false);
-        }
-    }
-
-    private finish(confirmed: boolean) {
-        if (this.settled) return;
-        this.settled = true;
-        this.resolve(confirmed);
-        this.close();
-    }
-}
-
-class CreateListModal extends Modal {
-    private resolve: (name: string | null) => void;
-    private settled = false;
-    private input!: HTMLInputElement;
-
-    constructor(app: App, resolve: (name: string | null) => void) {
-        super(app);
-        this.resolve = resolve;
-    }
-
-    onOpen() {
-        this.titleEl.setText(t('sidebar.newList'));
-        this.contentEl.addClass('todo-create-list-modal');
-
-        this.input = this.contentEl.createEl('input', {
-            cls: 'todo-create-list-input',
-            attr: { type: 'text', placeholder: t('modal.createListPlaceholder'), maxlength: '64' },
-        });
-        this.input.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                this.submit();
-            }
-        });
-        window.setTimeout(() => this.input.focus(), 0);
-
-        const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
-        const cancel = actions.createEl('button', { text: t('common.cancel') });
-        cancel.setAttr('type', 'button');
-        cancel.onclick = () => this.finish(null);
-
-        const confirm = actions.createEl('button', { text: t('common.create'), cls: 'mod-cta' });
-        confirm.setAttr('type', 'button');
-        confirm.onclick = () => this.submit();
-    }
-
-    onClose() {
-        this.contentEl.empty();
-        if (!this.settled) {
-            this.settled = true;
-            this.resolve(null);
-        }
-    }
-
-    private submit() {
-        const name = this.input.value.trim();
-        if (!name) {
-            this.input.focus();
-            return;
-        }
-        this.finish(name);
-    }
-
-    private finish(name: string | null) {
-        if (this.settled) return;
-        this.settled = true;
-        this.resolve(name);
-        this.close();
-    }
-}
-
-function buildTaskMeta(task: TodoTask): TaskMeta | null {
-    if (task.status === 'completed') {
-        const completedDate = task.completedDateTime?.dateTime;
-        return {
-            text: completedDate ? formatFriendlyDate(completedDate) : t('date.completed'),
-            kind: 'completed',
-        };
-    }
-
-    const due = dateToInputValue(task.dueDateTime?.dateTime || '');
-    if (!due) return null;
-
-    const today = toLocalDateKey(new Date());
-    const tomorrowDate = new Date();
-    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-    const tomorrow = toLocalDateKey(tomorrowDate);
-
-    if (due === today) return { text: t('date.today'), kind: 'today' };
-    if (due === tomorrow) return { text: t('date.tomorrow'), kind: 'tomorrow' };
-    if (due < today) return { text: t('date.overdueWithDate', { date: formatShortDate(due) }), kind: 'overdue' };
-    return { text: formatShortDate(due), kind: 'date' };
-}
-
-function isTaskDueOn(task: TodoTask, dateKey: string): boolean {
-    return dateToInputValue(task.dueDateTime?.dateTime || '') === dateKey;
-}
-
-function isTaskOverdue(task: TodoTask, today: string): boolean {
-    const due = dateToInputValue(task.dueDateTime?.dateTime || '');
-    return !!due && due < today;
-}
-
-function toLocalDateKey(date: Date): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-export { toLocalDateKey };
-
-function dateToInputValue(value: string): string {
-    if (!value) return '';
-    return value.includes('T') ? (value.split('T')[0] || '') : value;
-}
-
-function formatShortDate(value: string): string {
-    const date = dateToInputValue(value);
-    const parts = date.split('-');
-    if (parts.length !== 3) return date;
-    const month = Number(parts[1]);
-    const day = Number(parts[2]);
-    return t('date.shortFormat', { month, day });
-}
-
-function formatFriendlyDate(value: string): string {
-    const date = dateToInputValue(value);
-    if (!date) return value;
-
-    const today = toLocalDateKey(new Date());
-    if (date === today) return t('date.today');
-    return formatShortDate(date);
-}
-
-function formatDisplayDate(value: string): string {
-    const date = dateToInputValue(value);
-    if (!date) return value;
-    const parts = date.split('-');
-    if (parts.length !== 3) return date;
-    return t('date.fullFormat', { y: parts[0], m: parts[1], d: parts[2] });
 }

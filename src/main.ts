@@ -1,83 +1,45 @@
-import { AbstractInputSuggest, App, Notice, ObsidianProtocolData, Plugin, PluginSettingTab, Setting, TFolder, WorkspaceLeaf } from 'obsidian';
-import { AuthManager, CLIENT_ID, TokenResponse } from './auth';
-import { MsTodoApi, TodoList } from './api/ms-todo-api';
-import { TodoView, VIEW_TYPE_TODO, TaskCacheSnapshot } from './ui/todo-view';
-import { QuickCaptureModal } from './ui/quick-capture-modal';
-import { DEFAULT_SETTINGS, MsTodoSettings } from './settings';
+import { Notice, Plugin, type ObsidianProtocolData, type WorkspaceLeaf } from 'obsidian';
+import { AuthSession } from './auth/session';
+import { registerCommands, syncTasksToMarkdown } from './commands';
+import { readSettings, type MsTodoSettings } from './settings';
+import { isValidTaskCacheSnapshot, type TaskCacheSnapshot } from './sync/task-cache';
+import { MsTodoSettingTab } from './ui/settings-tab';
+import { TodoView, VIEW_TYPE_TODO } from './ui/todo-view';
 import { setLocale, t, type LocalePreference } from './i18n';
 
 export default class MsTodoPlugin extends Plugin {
     settings: MsTodoSettings;
-    auth: AuthManager;
-    pkceVerifier: string = '';
+    session: AuthSession;
     taskCacheSnapshot: TaskCacheSnapshot | null = null;
-    sessionVersion = 0;
     private settingsSave: Promise<void> = Promise.resolve();
 
     async onload() {
+        this.session = new AuthSession(this.app.secretStorage);
         await this.loadSettings();
-        setLocale(this.settings.locale);
-        this.auth = new AuthManager();
-
-        this.registerObsidianProtocolHandler('mstodo-auth', async (data: ObsidianProtocolData) => {
-            await this.handleAuthCallback(data);
-        });
-
-        this.registerView(VIEW_TYPE_TODO, (leaf) => new TodoView(leaf, this));
-        this.addRibbonIcon('check-square', 'Microsoft To Do', () => this.activateView());
-        this.registerCommands();
-
+        this.registerObsidianProtocolHandler('mstodo-auth', data => this.handleAuthCallback(data));
+        this.registerView(VIEW_TYPE_TODO, leaf => new TodoView(leaf, this));
+        this.addRibbonIcon('check-square', 'Microsoft To Do', () => { void this.activateView(); });
+        registerCommands(this);
         this.addSettingTab(new MsTodoSettingTab(this.app, this));
 
-        if (this.settings.syncOnStartup && this.settings.markdownSyncEnabled && this.settings.accessToken) {
+        if (this.settings.syncOnStartup && this.settings.markdownSyncEnabled && this.session.signedIn) {
             const timer = window.setTimeout(() => {
-                void this.syncTasksToMarkdown({ silent: true });
+                void syncTasksToMarkdown(this, { silent: true });
             }, 2000);
             this.register(() => window.clearTimeout(timer));
         }
     }
 
-    registerCommands() {
-        // Obsidian's App.commands registry is not in the public type surface;
-        // it does exist at runtime and is the documented way to drop commands.
-        const commands = (this.app as unknown as { commands: { removeCommand(id: string): void } }).commands;
-        const ids = ['open-view', 'quick-capture', 'sync-to-markdown'] as const;
-        ids.forEach((id) => commands.removeCommand(`${this.manifest.id}:${id}`));
-
-        this.addCommand({
-            id: 'open-view',
-            name: t('commands.openView'),
-            callback: () => { void this.activateView(); },
-        });
-
-        this.addCommand({
-            id: 'quick-capture',
-            name: t('commands.quickCapture'),
-            callback: () => { void this.openQuickCapture(); },
-        });
-
-        this.addCommand({
-            id: 'sync-to-markdown',
-            name: t('commands.syncToMarkdown'),
-            callback: () => this.syncTasksToMarkdown(),
-        });
-    }
-
-    async setPluginLocale(locale: LocalePreference) {
-        if (this.settings.locale === locale) return;
-        this.settings.locale = locale;
-        await this.saveSettings();
-        setLocale(locale);
-        this.registerCommands();
-        this.refreshView();
+    onunload() {
+        this.getTodoView()?.flushTaskCachePersist();
+        this.session?.invalidate();
     }
 
     async login() {
-        if (!CLIENT_ID.includes('Here')) {
-            const session = ++this.sessionVersion;
-            this.pkceVerifier = this.auth.generateCodeVerifier();
-            const url = await this.auth.getAuthUrl(this.pkceVerifier);
-            if (session === this.sessionVersion) window.open(url);
+        try {
+            await this.session.login();
+        } catch {
+            new Notice(t('notices.tokenFailed'));
         }
     }
 
@@ -86,314 +48,89 @@ export default class MsTodoPlugin extends Plugin {
             new Notice(t('notices.authorizationRefused'));
             return;
         }
-
-        if (data.code && this.pkceVerifier) {
-            const session = this.sessionVersion;
-            const verifier = this.pkceVerifier;
-            this.pkceVerifier = '';
-            try {
-                new Notice(t('notices.connecting'));
-                const tokens = await this.auth.exchangeCodeForToken(data.code, verifier);
-                await this.saveTokens(tokens, session);
-                if (session !== this.sessionVersion) return;
-                new Notice(t('notices.connected'));
-                this.refreshView();
-                if (this.settings.syncAfterLogin && this.settings.markdownSyncEnabled) {
-                    await this.syncTasksToMarkdown({ silent: true });
-                }
-            } catch (error) {
-                if (session !== this.sessionVersion) return;
-                console.error(error);
-                new Notice(t('notices.tokenFailed'));
+        if (!data.code) return;
+        const version = this.session.version;
+        try {
+            const connected = await this.session.completeLogin(data.code);
+            if (!connected) return;
+            this.taskCacheSnapshot = null;
+            new Notice(t('notices.connected'));
+            this.refreshView();
+            if (this.settings.syncAfterLogin && this.settings.markdownSyncEnabled) {
+                await syncTasksToMarkdown(this, { silent: true });
             }
+        } catch {
+            if (version === this.session.version) new Notice(t('notices.tokenFailed'));
         }
     }
 
-    async saveTokens(tokens: TokenResponse, session: number) {
-        if (session !== this.sessionVersion) return;
-        this.settings.accessToken = tokens.access_token;
-        this.settings.refreshToken = tokens.refresh_token || this.settings.refreshToken;
-        this.settings.tokenExpiresAt = Date.now() + (tokens.expires_in * 1000);
-        await this.saveSettings();
-    }
-
     async clearData() {
-        this.sessionVersion++;
-        this.pkceVerifier = '';
-        this.settings = Object.assign({}, DEFAULT_SETTINGS);
+        try {
+            this.session.signOut();
+        } catch {
+            new Notice(t('account.signOutFailed'));
+            return;
+        }
         this.taskCacheSnapshot = null;
         this.refreshView();
         await this.saveSettings();
     }
 
-    onunload() {
-        this.getTodoView()?.flushTaskCachePersist();
-        this.sessionVersion++;
-    }
-
-    refreshView() {
-        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_TODO);
-        leaves.forEach(leaf => { if (leaf.view instanceof TodoView) void leaf.view.render(); });
-    }
-
-    getTodoView(): TodoView | null {
-        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_TODO);
-        for (const leaf of leaves) {
-            if (leaf.view instanceof TodoView) return leaf.view;
-        }
-        return null;
-    }
-
-    async openQuickCapture() {
-        if (!this.settings.accessToken) {
-            new Notice(t('notices.signInRequiredForQuickCapture'));
-            return;
-        }
-
-        const api = new MsTodoApi(this);
-        let lists: TodoList[] = [];
-        const view = this.getTodoView();
-        if (view && view.currentLists.length > 0) {
-            lists = view.currentLists;
-        } else {
-            try {
-                lists = await api.getTaskLists();
-            } catch (error) {
-                new Notice(t('notices.loadListsFailed'));
-                console.error(error);
-                return;
-            }
-        }
-
-        const defaultList = lists.find((list) => list.wellknownListName === 'defaultList') || lists[0];
-        if (!api.isCurrentSession()) return;
-        const currentList = view ? view.getSelectedList(view.currentLists) : null;
-        const preferredListId = currentList?.id || defaultList?.id;
-        new QuickCaptureModal(this.app, this, api, lists, preferredListId).open();
-    }
-
-    async syncTasksToMarkdown(options: { silent?: boolean } = {}) {
-        if (!this.settings.accessToken) {
-            new Notice(t('notices.signInRequired'));
-            return;
-        }
-
-        if (!this.settings.markdownSyncEnabled) {
-            if (!options.silent) {
-                new Notice(t('notices.markdownSyncDisabled'));
-            }
-            return;
-        }
-
-        try {
-            const api = new MsTodoApi(this);
-            const result = await api.syncAllTasksToMarkdown();
-            if (!options.silent) {
-                new Notice(t('notices.syncCompleted', { listCount: result.listCount, taskCount: result.taskCount, path: result.path }));
-            }
-        } catch (error) {
-            console.error(error);
-            if (!options.silent) {
-                new Notice(t('notices.syncFailed'));
-            }
-        }
+    async setPluginLocale(locale: LocalePreference) {
+        if (this.settings.locale === locale) return;
+        this.settings.locale = locale;
+        await this.saveSettings();
+        setLocale(locale);
+        registerCommands(this);
+        this.refreshView();
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS);
-        this.taskCacheSnapshot = null;
-
-        const data = await this.loadData() as Record<string, unknown> | null;
-        if (!data) return;
-
-        const { taskCacheSnapshot, ...settingsData } = data;
-        Object.assign(this.settings, settingsData);
-        this.taskCacheSnapshot = isValidTaskCacheSnapshot(taskCacheSnapshot) ? taskCacheSnapshot : null;
+        const loaded: unknown = await this.loadData();
+        const data = loaded && typeof loaded === 'object' ? loaded as Record<string, unknown> : {};
+        this.settings = readSettings(data);
+        setLocale(this.settings.locale);
+        this.taskCacheSnapshot = isValidTaskCacheSnapshot(data.taskCacheSnapshot) ? data.taskCacheSnapshot : null;
+        try {
+            this.session.restore(data.refreshToken);
+        } catch {
+            new Notice(t('account.storageFailed'));
+            throw new Error(t('account.storageFailed'));
+        }
+        if (!this.session.signedIn) this.taskCacheSnapshot = null;
+        if ('accessToken' in data || 'refreshToken' in data || 'tokenExpiresAt' in data) {
+            await this.saveSettings();
+        }
     }
 
     async saveSettings() {
-        const payload: Record<string, unknown> = { ...this.settings };
+        const payload: Record<string, unknown> = { ...readSettings(this.settings) };
         if (this.taskCacheSnapshot) payload.taskCacheSnapshot = this.taskCacheSnapshot;
         // Keep sign-out's cleared data after any save that was already in flight.
         this.settingsSave = this.settingsSave.catch(() => {}).then(() => this.saveData(payload));
         await this.settingsSave;
     }
 
+    refreshView() {
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TODO)) {
+            if (leaf.view instanceof TodoView) void leaf.view.render();
+        }
+    }
+
+    getTodoView(): TodoView | null {
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TODO)) {
+            if (leaf.view instanceof TodoView) return leaf.view;
+        }
+        return null;
+    }
+
     async activateView() {
         const { workspace } = this.app;
-        let leaf: WorkspaceLeaf | null = null;
-        const leaves = workspace.getLeavesOfType(VIEW_TYPE_TODO);
-        if (leaves.length > 0) leaf = leaves[0] as WorkspaceLeaf;
-        else {
+        let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_TODO)[0] || null;
+        if (!leaf) {
             leaf = workspace.getRightLeaf(false);
             if (leaf) await leaf.setViewState({ type: VIEW_TYPE_TODO, active: true });
         }
         if (leaf) void workspace.revealLeaf(leaf);
-    }
-}
-
-function isValidTaskCacheSnapshot(value: unknown): value is TaskCacheSnapshot {
-    if (!value || typeof value !== 'object') return false;
-    const snapshot = value as Partial<TaskCacheSnapshot>;
-    if (snapshot.version !== 1) return false;
-    if (!Array.isArray(snapshot.lists) || snapshot.lists.length === 0) return false;
-    if (!snapshot.lists.every((list) => !!list && typeof list.id === 'string' && typeof list.displayName === 'string')) return false;
-    if (!snapshot.entries || typeof snapshot.entries !== 'object' || Array.isArray(snapshot.entries)) return false;
-    return Object.values(snapshot.entries).every((entry) =>
-        !!entry && Array.isArray(entry.tasks) && typeof entry.allLoaded === 'boolean' && typeof entry.updatedAt === 'number');
-}
-
-class FolderPathSuggest extends AbstractInputSuggest<string> {
-    private onChoose: (folderPath: string) => void;
-
-    constructor(app: App, inputEl: HTMLInputElement, onChoose: (folderPath: string) => void) {
-        super(app, inputEl);
-        this.onChoose = onChoose;
-    }
-
-    getSuggestions(query: string): string[] {
-        const lower = query.trim().toLowerCase();
-        const folders: string[] = [];
-        this.app.vault.getAllLoadedFiles().forEach((file) => {
-            if (file instanceof TFolder && file.path !== '/') folders.push(file.path);
-        });
-        const filtered = lower
-            ? folders.filter((path) => path.toLowerCase().includes(lower))
-            : folders;
-        return filtered.slice(0, 20);
-    }
-
-    renderSuggestion(folderPath: string, el: HTMLElement) {
-        el.setText(folderPath);
-    }
-
-    selectSuggestion(folderPath: string, evt: MouseEvent | KeyboardEvent) {
-        super.selectSuggestion(folderPath, evt);
-        this.onChoose(folderPath);
-    }
-}
-
-class MsTodoSettingTab extends PluginSettingTab {
-    plugin: MsTodoPlugin;
-
-    constructor(app: App, plugin: MsTodoPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
-    }
-
-    display(): void {
-        const { containerEl } = this;
-        containerEl.empty();
-
-        new Setting(containerEl)
-            .setName('Microsoft To Do')
-            .setHeading();
-
-        if (this.plugin.settings.accessToken) {
-            new Setting(containerEl)
-                .setName(t('settings.accountStatus'))
-                .setDesc(t('settings.signedIn'))
-                .addButton(btn => btn
-                    .setButtonText(t('common.signOut'))
-                    .setWarning()
-                    .onClick(async () => {
-                        await this.plugin.clearData();
-                        this.display();
-                    })
-                );
-        } else {
-            new Setting(containerEl)
-                .setName(t('settings.accountStatus'))
-                .setDesc(t('settings.notSignedIn'))
-                .addButton(btn => btn
-                    .setButtonText(t('common.signIn'))
-                    .setCta()
-                    .onClick(() => {
-                        void this.plugin.login();
-                    })
-                );
-        }
-
-        new Setting(containerEl)
-            .setName(t('settings.language'))
-            .setDesc(t('settings.languageDesc'))
-            .addDropdown(dropdown => dropdown
-                .addOption('auto', t('settings.languageAuto'))
-                .addOption('en', t('settings.languageEn'))
-                .addOption('zh-cn', t('settings.languageZhCn'))
-                .setValue(this.plugin.settings.locale)
-                .onChange(async (value) => {
-                    await this.plugin.setPluginLocale(value as LocalePreference);
-                    this.display();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('settings.markdownSync'))
-            .setDesc(t('settings.markdownSyncDesc'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.markdownSyncEnabled)
-                .onChange(async (value) => {
-                    this.plugin.settings.markdownSyncEnabled = value;
-                    await this.plugin.saveSettings();
-                    this.display();
-                }));
-
-        if (this.plugin.settings.markdownSyncEnabled) {
-            let syncPathInput: HTMLInputElement | null = null;
-            const applySyncPath = async (value: string) => {
-                this.plugin.settings.markdownSyncPath = value.trim() || DEFAULT_SETTINGS.markdownSyncPath;
-                await this.plugin.saveSettings();
-            };
-            new Setting(containerEl)
-                .setName(t('settings.markdownSyncFile'))
-                .setDesc(t('settings.markdownSyncFileDesc'))
-                .addSearch(search => {
-                    syncPathInput = search.inputEl;
-                    search
-                        .setPlaceholder('Microsoft To Do.md')
-                        .setValue(this.plugin.settings.markdownSyncPath)
-                        .onChange((value) => { void applySyncPath(value); });
-                });
-            if (syncPathInput) {
-                new FolderPathSuggest(this.app, syncPathInput, (folderPath) => {
-                    const current = this.plugin.settings.markdownSyncPath.trim();
-                    const currentName = current.split('/').pop() || 'Microsoft To Do.md';
-                    const folder = folderPath.replace(/^\/+|\/+$/g, '');
-                    const next = folder ? `${folder}/${currentName}` : currentName;
-                    if (syncPathInput) syncPathInput.value = next;
-                    void applySyncPath(next);
-                });
-            }
-
-            new Setting(containerEl)
-                .setName(t('settings.syncAfterLogin'))
-                .setDesc(t('settings.syncAfterLoginDesc'))
-                .addToggle(toggle => toggle
-                    .setValue(this.plugin.settings.syncAfterLogin)
-                    .onChange(async (value) => {
-                        this.plugin.settings.syncAfterLogin = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName(t('settings.syncOnStartup'))
-                .setDesc(t('settings.syncOnStartupDesc'))
-                .addToggle(toggle => toggle
-                    .setValue(this.plugin.settings.syncOnStartup)
-                    .onChange(async (value) => {
-                        this.plugin.settings.syncOnStartup = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName(t('settings.manualSync'))
-                .setDesc(t('settings.manualSyncDesc'))
-                .addButton(btn => btn
-                    .setButtonText(t('settings.syncNow'))
-                    .setCta()
-                    .onClick(() => {
-                        void this.plugin.syncTasksToMarkdown();
-                    }));
-        }
     }
 }

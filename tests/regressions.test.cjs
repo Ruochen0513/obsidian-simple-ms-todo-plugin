@@ -4,17 +4,17 @@ const { setup, deferred, Element, list, task } = require('./helpers.cjs');
 
 test('sign-out rejects a pending token refresh and clears view data and timers', async () => {
     const { plugin, view, api, timers } = setup();
-    plugin.settings.tokenExpiresAt = 0;
     const refresh = deferred();
-    api.auth.refreshAccessToken = () => refresh.promise;
-    const token = api.getValidToken();
+    plugin.session.oauth.refreshAccessToken = () => refresh.promise;
+    const token = plugin.session.getValidToken(plugin.session.version);
     view.scheduleCachePersist();
     const timer = view.cachePersistTimer;
     await plugin.clearData();
     refresh.resolve({ access_token: 'stale-access', refresh_token: 'stale-refresh', expires_in: 3600 });
     await assert.rejects(token);
     await view.persistTaskCache();
-    assert.equal(plugin.saved.accessToken, '');
+    assert.equal(plugin.saved.accessToken, undefined);
+    assert.equal(plugin.session.signedIn, false);
     assert.equal(plugin.saved.taskCacheSnapshot, undefined);
     assert.equal(view.taskCache.size, 0);
     assert.equal(view.currentTasks.length, 0);
