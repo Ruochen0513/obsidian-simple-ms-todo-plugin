@@ -10,13 +10,11 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     detail.addClass('is-open');
 
     const topbar = detail.createDiv({ cls: 'todo-detail-topbar' });
-    const closeBtn = topbar.createEl('button', { cls: 'todo-icon-button todo-detail-close' });
+    const closeBtn = topbar.createEl('button', { cls: 'todo-detail-close' });
     closeBtn.setAttr('type', 'button');
     closeBtn.setAttr('aria-label', t('taskDetail.backAria'));
     setIcon(closeBtn, 'arrow-left');
-    topbar.createSpan({ text: t('taskDetail.title'), cls: 'todo-detail-topbar-title' });
-    const topbarSpacer = topbar.createSpan({ cls: 'todo-detail-topbar-spacer' });
-    topbarSpacer.setAttr('aria-hidden', 'true');
+    closeBtn.createSpan({ text: t('taskDetail.backAria'), cls: 'todo-detail-topbar-title' });
 
     closeBtn.onclick = () => {
         view.selectedTaskId = null;
@@ -28,13 +26,15 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     const header = detail.createDiv({ cls: 'todo-detail-header' });
     const complete = header.createEl('input', { type: 'checkbox', cls: 'todo-task-checkbox' });
     complete.checked = task.status === 'completed';
+    complete.setAttr('aria-label', task.status === 'completed' ? t('taskRow.reopenAria') : t('taskRow.completeAria'));
     complete.onchange = () => {
         void view.toggleTaskCompletionOptimistically(api, list, listArea, detail, task);
     };
 
     const titleInput = header.createEl('textarea', { cls: 'todo-title-input' });
     titleInput.value = task.title;
-    titleInput.rows = 2;
+    titleInput.rows = 1;
+    titleInput.setAttr('aria-label', t('taskDetail.taskName'));
     titleInput.onblur = () => {
         const nextTitle = titleInput.value.trim();
         if (!nextTitle || nextTitle === task.title) return;
@@ -52,6 +52,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     const starBtn = header.createEl('button', { cls: 'todo-star-button' });
     starBtn.setAttr('type', 'button');
     starBtn.setAttr('aria-label', task.importance === 'high' ? t('taskDetail.removeImportantAria') : t('taskDetail.markImportantAria'));
+    starBtn.setAttr('aria-pressed', String(task.importance === 'high'));
     setIcon(starBtn, 'star');
     if (task.importance === 'high') starBtn.addClass('is-important');
     starBtn.onclick = () => {
@@ -186,7 +187,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
         };
     });
 
-    const stepComposer = stepsCard.createDiv({ cls: 'todo-step-add' });
+    const stepComposer = stepsCard.createEl('label', { cls: 'todo-step-add' });
     const stepAddIcon = stepComposer.createSpan({ cls: 'todo-step-add-icon' });
     setIcon(stepAddIcon, 'plus');
     const stepInput = stepComposer.createEl('input', { cls: 'todo-step-add-input' });
@@ -226,7 +227,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     };
 
     stepInput.addEventListener('keydown', (event: KeyboardEvent) => {
-        if (event.key === 'Enter') {
+        if (event.key === 'Enter' && !event.isComposing) {
             event.preventDefault();
             addStep();
         }
@@ -237,7 +238,9 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     const dateLabelIcon = dateLabel.createSpan();
     setIcon(dateLabelIcon, 'calendar-days');
     dateLabel.createSpan({ text: t('taskDetail.dueDateLabel') });
-    const dateInput = dateCard.createEl('input', { type: 'date' });
+    const dateControl = dateCard.createDiv({ cls: 'todo-date-control' });
+    const dateInput = dateControl.createEl('input', { type: 'date', cls: 'todo-date-input' });
+    dateInput.setAttr('aria-label', t('taskDetail.dueDateLabel'));
     dateInput.value = dateToInputValue(task.dueDateTime?.dateTime || '');
     dateInput.onchange = () => {
         void view.saveTaskChange(
@@ -251,7 +254,11 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
         );
     };
     if (task.dueDateTime?.dateTime) {
-        const clearDate = dateCard.createEl('button', { text: t('taskDetail.clearDate'), cls: 'todo-link-button' });
+        const clearDate = dateControl.createEl('button', { cls: 'todo-clear-date' });
+        clearDate.setAttr('type', 'button');
+        clearDate.setAttr('aria-label', t('taskDetail.clearDate'));
+        clearDate.setAttr('title', t('taskDetail.clearDate'));
+        setIcon(clearDate, 'x');
         clearDate.onclick = () => {
             void view.saveTaskChange(
                 api,
@@ -279,6 +286,7 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
         const chipBtn = chipsRow.createEl('button', { text: chip.label, cls: 'todo-date-chip' });
         chipBtn.setAttr('type', 'button');
         chipBtn.setAttr('aria-label', t('taskDetail.setDueDateAria', { label: chip.label }));
+        chipBtn.setAttr('aria-pressed', String(currentDue === chipKey));
         if (currentDue === chipKey) chipBtn.addClass('is-active');
         chipBtn.onclick = () => {
             void view.saveTaskChange(
@@ -298,13 +306,16 @@ export function renderTaskDetail(view: TodoView, api: MsTodoApi, detail: HTMLEle
     const noteLabelIcon = noteLabel.createSpan();
     setIcon(noteLabelIcon, 'notebook-pen');
     noteLabel.createSpan({ text: t('taskDetail.notesLabel') });
-    const noteInput = noteCard.createEl('textarea', { cls: 'todo-note-input', placeholder: t('taskDetail.notePlaceholder') });
+    const noteInput = noteCard.createEl('textarea', { cls: 'todo-note-input' });
+    noteInput.setAttr('placeholder', t('taskDetail.notePlaceholder'));
+    noteInput.setAttr('aria-label', t('taskDetail.notesLabel'));
     noteInput.value = noteDrafts.get(task.id) ?? taskBodyText(task.body);
     noteInput.addEventListener('input', () => {
         noteDrafts.set(task.id, noteInput.value);
     });
-    noteInput.rows = 8;
-    const saveNote = noteCard.createEl('button', { text: t('taskDetail.saveNote'), cls: 'todo-primary-button todo-save-note' });
+    noteInput.rows = 3;
+    const saveNote = noteLabel.createEl('button', { text: t('taskDetail.saveNote'), cls: 'todo-save-note' });
+    saveNote.setAttr('type', 'button');
     saveNote.onclick = () => {
         const content = noteInput.value;
         void view.saveTaskChange(

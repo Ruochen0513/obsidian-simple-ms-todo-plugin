@@ -170,3 +170,20 @@ test('a pending step failure after sign-out cannot restore tasks or leave pendin
     assert.equal(c.view.pendingChecklistItemIds.size, 0);
     assert.equal(c.notices.length, notices);
 });
+
+test('confirming a Chinese input candidate does not create a checklist step', async () => {
+    const c = openChecklist();
+    let creations = 0;
+    c.api.createChecklistItem = async (_list, _task, name) => {
+        creations++;
+        return { id: 'created', displayName: name, isChecked: false };
+    };
+    const input = c.view.mainDetail.querySelector('.todo-step-add-input');
+    input.value = '准备资料';
+    input.emit('keydown', { key: 'Enter', isComposing: true });
+    assert.equal(creations, 0);
+    input.emit('keydown', { key: 'Enter', isComposing: false, preventDefault() {} });
+    await settle();
+    assert.equal(creations, 1);
+    assert.equal(c.task.checklistItems.at(-1).displayName, '准备资料');
+});

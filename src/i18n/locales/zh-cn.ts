@@ -89,7 +89,7 @@ export const zhCn: Record<TranslationKey, string> = {
     'taskRow.syncingAria': '正在同步',
 
     'taskDetail.backAria': '返回任务列表',
-    'taskDetail.title': '任务详情',
+    'taskDetail.taskName': '任务名称',
     'taskDetail.titleUpdated': '已更新任务名称',
     'taskDetail.removeImportantAria': '取消重要标记',
     'taskDetail.markImportantAria': '标记为重要',

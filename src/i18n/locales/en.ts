@@ -87,7 +87,7 @@ export const en = {
     'taskRow.syncingAria': 'Syncing',
 
     'taskDetail.backAria': 'Back to tasks',
-    'taskDetail.title': 'Task details',
+    'taskDetail.taskName': 'Task name',
     'taskDetail.titleUpdated': 'Title updated',
     'taskDetail.removeImportantAria': 'Remove importance',
     'taskDetail.markImportantAria': 'Mark as important',

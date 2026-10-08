@@ -42,8 +42,8 @@ export class QuickCaptureModal extends Modal {
 
         const row = this.contentEl.createDiv({ cls: 'todo-quick-capture-row' });
 
-        const listField = row.createDiv({ cls: 'todo-quick-capture-field' });
-        listField.createDiv({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureTargetList') });
+        const listField = row.createEl('label', { cls: 'todo-quick-capture-field' });
+        listField.createSpan({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureTargetList') });
         this.listSelect = listField.createEl('select', { cls: 'dropdown todo-quick-capture-select' });
         this.listSelect.setAttr('aria-label', t('modal.quickCaptureTargetList'));
         this.lists.forEach((list) => {
@@ -55,8 +55,8 @@ export class QuickCaptureModal extends Modal {
             this.listSelect.value = this.preferredListId;
         }
 
-        const dateField = row.createDiv({ cls: 'todo-quick-capture-field' });
-        dateField.createDiv({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureDueDate') });
+        const dateField = row.createEl('label', { cls: 'todo-quick-capture-field' });
+        dateField.createSpan({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureDueDate') });
         this.dueDateInput = dateField.createEl('input', { type: 'date', cls: 'todo-quick-capture-date' });
         this.dueDateInput.setAttr('aria-label', t('modal.quickCaptureDueDate'));
         this.contentEl.createDiv({ cls: 'todo-quick-capture-hint', text: t('modal.quickCaptureDateHint') });
