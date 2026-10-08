@@ -45,6 +45,7 @@ export class TodoView extends ItemView {
     private searchTimer: number | null = null;
     private noteDrafts = new Map<string, string>();
     stepDrafts = new Map<string, string>();
+    stepScrollPositions = new Map<string, number>();
     pendingChecklistOrderTaskIds = new Set<string>();
     disposeDetailSteps?: () => void;
     disposeDetailDatePicker?: () => void;
@@ -89,6 +90,7 @@ export class TodoView extends ItemView {
             this.taskCache.clear();
             this.noteDrafts.clear();
             this.stepDrafts.clear();
+            this.stepScrollPositions.clear();
             this.pendingChecklistOrderTaskIds.clear();
             this.pendingTaskIds.clear();
             this.pendingChecklistItemIds.clear();

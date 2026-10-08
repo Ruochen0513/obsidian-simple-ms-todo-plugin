@@ -579,9 +579,11 @@
 .ms-todo-container .todo-detail-panel textarea.todo-title-input {
     width: 100%;
     min-width: 0;
-    min-height: 32px;
-    max-height: 180px;
-    field-sizing: content;
+    height: 54px;
+    min-height: 54px;
+    max-height: 54px;
+    field-sizing: fixed;
+    overflow-y: auto;
     padding: 3px 4px;
     resize: none;
     border: 1px solid transparent;
@@ -671,14 +673,15 @@
 }
 
 .todo-date-control {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
     align-items: center;
     gap: 4px;
 }
 
 .ms-todo-container .todo-detail-panel input.todo-date-input {
     flex: 1;
-    width: 0;
+    width: 100%;
     min-width: 0;
     height: 34px;
     padding: 5px 8px;
@@ -692,9 +695,11 @@
 .ms-todo-container .todo-detail-panel textarea.todo-note-input {
     width: 100%;
     min-width: 0;
-    min-height: 80px;
-    max-height: 320px;
-    field-sizing: content;
+    height: 96px;
+    min-height: 96px;
+    max-height: 96px;
+    field-sizing: fixed;
+    overflow-y: auto;
     resize: none;
     padding: 8px;
     border: 1px solid var(--mstodo-detail-border);
@@ -705,7 +710,21 @@
     line-height: 1.5;
 }
 
+.todo-step-list {
+    position: relative;
+    height: 160px;
+    flex: 0 0 160px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+    overflow-anchor: none;
+}
+
+.todo-step-list.is-reordering { user-select: none; cursor: grabbing; }
+
 .todo-step-row {
+    position: relative;
     display: grid;
     grid-template-columns: 20px 18px minmax(0, 1fr) 28px;
     align-items: start;
@@ -769,7 +788,14 @@
 }
 
 .todo-step-drag svg { width: 14px; height: 14px; }
-.todo-step-row.is-dragging { background: var(--background-modifier-hover); opacity: 0.6; }
+.todo-step-row.is-dragging {
+    z-index: 1;
+    background: var(--background-primary);
+    border-radius: 5px;
+    box-shadow: 0 2px 8px var(--background-modifier-box-shadow);
+    outline: 1px solid var(--background-modifier-border);
+    will-change: transform;
+}
 .todo-step-row.is-dragging .todo-step-drag { cursor: grabbing; }
 .todo-step-label { cursor: text; border-radius: 4px; }
 .todo-step-label:focus-visible,
@@ -909,7 +935,7 @@
 
 .todo-detail-footer {
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
     padding: 12px 2px 4px;

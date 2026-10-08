@@ -18,6 +18,9 @@ export function renderTaskSteps(view: TodoView, api: MsTodoApi, detail: HTMLElem
     const checklistItems = task.checklistItems || [];
     const orderKey = checklistOrderKey(list.id, task.id);
     const stepList = stepsCard.createDiv({ cls: 'todo-step-list' });
+    stepList.setAttr('role', 'region');
+    stepList.setAttr('aria-label', t('taskDetail.stepsLabel'));
+    owner.register(() => view.stepScrollPositions.set(orderKey, stepList.scrollTop));
     const orderStatus = stepsCard.createDiv({ cls: 'todo-step-order-status', attr: { 'aria-live': 'polite' } });
     const orderDisabled = () => !api.isCurrentSession() || view.pendingChecklistOrderTaskIds.has(orderKey)
         || [...view.pendingChecklistItemIds].some(key => key.startsWith(`${task.id}:`));
@@ -28,6 +31,8 @@ export function renderTaskSteps(view: TodoView, api: MsTodoApi, detail: HTMLElem
 
     const refocusStepInput = () => {
         window.setTimeout(() => {
+            const currentSteps = detail.querySelector<HTMLElement>('.todo-step-list');
+            if (currentSteps) currentSteps.scrollTop = currentSteps.scrollHeight;
             const active = document.activeElement;
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
             const nextInput = detail.querySelector('.todo-step-add-input');
@@ -160,6 +165,7 @@ export function renderTaskSteps(view: TodoView, api: MsTodoApi, detail: HTMLElem
         };
     });
 
+    stepList.scrollTop = view.stepScrollPositions.get(orderKey) ?? 0;
     let savedOrder = checklistItems.map(item => item.id);
     attachStepReorder(owner, stepList, orderDisabled, ids => {
         if (orderDisabled()) return;

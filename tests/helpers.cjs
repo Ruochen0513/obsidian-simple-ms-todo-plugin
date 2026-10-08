@@ -35,6 +35,9 @@ class Element {
         this.value = '';
         this.text = options.text || '';
         this.ownerDocument = { body: {} };
+        this.scrollTop = 0;
+        this.style = {};
+        this.animations = [];
     }
     createEl(tag, options) {
         const child = new Element(options);
@@ -57,11 +60,22 @@ class Element {
         return child;
     }
     select() {}
+    scrollIntoView() {}
+    get offsetTop() { return (this.parentElement?.children.indexOf(this) || 0) * 40; }
+    get offsetHeight() { return 40; }
+    get nextElementSibling() { return this.parentElement?.children[this.parentElement.children.indexOf(this) + 1] || null; }
+    animate(frames, options) { const animation = { frames, options, cancel() { this.cancelled = true; } }; this.animations.push(animation); return animation; }
     get isConnected() { return !this.detached && (this.parentElement?.isConnected ?? true); }
     setPointerCapture(id) { this.pointerId = id; }
     hasPointerCapture(id) { return this.pointerId === id; }
     releasePointerCapture() { this.pointerId = null; }
-    getBoundingClientRect() { const top = (this.parentElement?.children.indexOf(this) || 0) * 40; return { top, height: 40, bottom: top + 40 }; }
+    getBoundingClientRect() {
+        const row = this.hasClass('todo-step-row');
+        const top = row ? this.offsetTop - (this.parentElement?.scrollTop || 0)
+            + Number(this.style.transform?.match(/translateY\(([-\d.]+)px\)/)?.[1] || 0) : 0;
+        const height = row ? 40 : 160;
+        return { top, height, bottom: top + height };
+    }
     setAttr(key, value) { this.attrs[key] = value; }
     getAttr(key) { return this.attrs[key]; }
     addClass(name) { this.classes.add(name); }
@@ -94,6 +108,7 @@ const task = { id: 'task-a', title: 'Needle', status: 'notStarted', body: { cont
 
 function setup(options = {}) {
     const timers = new Map();
+    const frames = new Map();
     const notices = [];
     const leaves = [];
     const secrets = new Map();
@@ -161,6 +176,9 @@ function setup(options = {}) {
         console: { warn() {}, error() {} },
         window: {
             open() {},
+            matchMedia: () => ({ matches: !!options.reducedMotion }),
+            requestAnimationFrame: callback => { const id = ++nextTimer; frames.set(id, callback); return id; },
+            cancelAnimationFrame: id => frames.delete(id),
             setTimeout: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
             clearTimeout: id => timers.delete(id),
         },
@@ -188,7 +206,7 @@ function setup(options = {}) {
     view.mainListArea = new Element();
     view.mainDetail = new Element();
     const api = new exports.MsTodoApi(plugin);
-    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host, pickers, scopes };
+    return { ...exports, plugin, view, api, timers, notices, network, secrets, storage, host, pickers, scopes, frames };
 }
 
 module.exports = { setup, deferred, Element, list, task };

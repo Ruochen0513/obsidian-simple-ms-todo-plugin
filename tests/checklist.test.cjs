@@ -4,8 +4,8 @@ const { setup, deferred, list } = require('./helpers.cjs');
 
 const settle = () => new Promise(setImmediate);
 
-function openChecklist() {
-    const context = setup();
+function openChecklist(options = {}) {
+    const context = setup(options);
     const { view, api } = context;
     const task = view.currentTasks[0];
     task.checklistItems = ['a', 'b'].map(id => ({ id, displayName: id, isChecked: false }));
@@ -302,7 +302,7 @@ test('pointer dragging saves on release; cancellation restores the original orde
     assert.deepEqual(orderInView(c), ['a', 'b']);
     handle.emit('pointerdown', start);
     container.emit('pointermove', { pointerId: 1, clientY: 10 });
-    container.emit('pointerup', { pointerId: 1 });
+    container.emit('pointerup', { pointerId: 1, clientY: 10 });
     await settle();
     assert.deepEqual(c.plugin.saved.checklistOrders[orderKey], ['b', 'a']);
     assert.equal(container.hasPointerCapture(1), false);
@@ -394,4 +394,67 @@ test('invalid saved checklist orders are ignored without losing valid entries', 
     } } });
     await c.plugin.loadSettings();
     assert.deepEqual(JSON.parse(JSON.stringify(c.plugin.checklistOrders)), { [orderKey]: ['b', 'a'] });
+});
+
+test('drag follows the pointer before changing slots and cleans up its animation frame on release', async () => {
+    const c = openChecklist();
+    const container = c.view.mainDetail.querySelector('.todo-step-list');
+    const row = rowFor(c, 'b');
+    row.querySelector('.todo-step-drag').emit('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientY: 60, preventDefault() {} });
+    container.emit('pointermove', { pointerId: 1, clientY: 50 });
+    assert.deepEqual(orderInView(c), ['a', 'b']);
+    assert.equal(row.style.transform, 'translateY(-10px)');
+    assert.equal(c.frames.size, 1);
+    container.emit('pointermove', { pointerId: 1, clientY: 10 });
+    assert.deepEqual(orderInView(c), ['b', 'a']);
+    assert.ok(rowFor(c, 'a').animations.length > 0);
+    container.emit('pointerup', { pointerId: 1, clientY: 10 });
+    await settle();
+    assert.equal(row.style.transform, '');
+    assert.equal(c.frames.size, 0);
+    assert.equal(container.hasClass('is-reordering'), false);
+});
+
+test('holding a dragged step at the edge scrolls the list without additional pointer events', () => {
+    const c = openChecklist();
+    const container = c.view.mainDetail.querySelector('.todo-step-list');
+    const row = rowFor(c, 'a');
+    row.querySelector('.todo-step-drag').emit('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientY: 20, preventDefault() {} });
+    container.emit('pointermove', { pointerId: 1, clientY: 155 });
+    const [id, tick] = [...c.frames][0];
+    c.frames.delete(id);
+    tick(16);
+    assert.ok(container.scrollTop > 0);
+    assert.equal(c.frames.size, 1);
+    c.view.mainDetail.querySelector('.todo-detail-close').onclick();
+    assert.equal(c.frames.size, 0);
+    assert.equal(row.style.transform, '');
+    assert.equal(container.hasPointerCapture(1), false);
+    assert.equal(c.plugin.saved, undefined);
+});
+
+test('reduced motion and keyboard reordering do not animate neighboring rows', async () => {
+    const c = openChecklist({ reducedMotion: true });
+    const container = c.view.mainDetail.querySelector('.todo-step-list');
+    rowFor(c, 'b').querySelector('.todo-step-drag').emit('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientY: 60, preventDefault() {} });
+    container.emit('pointermove', { pointerId: 1, clientY: 10 });
+    container.emit('pointerup', { pointerId: 1, clientY: 10 });
+    await settle();
+    assert.deepEqual(orderInView(c), ['b', 'a']);
+    assert.equal(rowFor(c, 'a').animations.length, 0);
+    assert.equal(rowFor(c, 'b').animations.length, 0);
+    const keyboard = openChecklist();
+    move(keyboard, 'b', 'ArrowUp');
+    await settle();
+    assert.equal(rowFor(keyboard, 'a').animations.length, 0);
+    assert.equal(rowFor(keyboard, 'b').animations.length, 0);
+});
+
+test('redrawing steps preserves their scroll position and sign-out clears it', async () => {
+    const c = openChecklist();
+    c.view.mainDetail.querySelector('.todo-step-list').scrollTop = 60;
+    c.view.renderTaskList(c.api, list, c.view.mainListArea, c.view.mainDetail);
+    assert.equal(c.view.mainDetail.querySelector('.todo-step-list').scrollTop, 60);
+    await c.plugin.clearData();
+    assert.equal(c.view.stepScrollPositions.size, 0);
 });
