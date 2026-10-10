@@ -26,7 +26,12 @@ export function renderTaskComposer(view: TodoView, api: MsTodoApi, parent: HTMLE
         row.setAttr('aria-busy', String(draft.submitting));
         add.disabled = draft.submitting || !list;
         add.setAttr('aria-label', t(draft.submitting ? 'modal.quickCaptureAdding' : 'sidebar.addTask'));
-        const hotkey = hotkeyManager?.printHotkeyForCommand?.(`${view.plugin.manifest.id}:quick-capture`) || '';
+        let hotkey = '';
+        try {
+            hotkey = hotkeyManager?.printHotkeyForCommand?.(`${view.plugin.manifest.id}:quick-capture`) || '';
+        } catch {
+            // Internal API; degrade to the plain placeholder if it ever throws.
+        }
         input.setAttr('placeholder', hotkey
             ? t('sidebar.quickInputShortcut', { hotkey: hotkey.replace(/\s*\+\s*/g, '+') }) : t('sidebar.quickInput'));
     };
