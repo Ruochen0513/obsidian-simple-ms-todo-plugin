@@ -1,8 +1,7 @@
-import { Notice, normalizePath, requestUrl } from 'obsidian';
-import { AuthManager } from '../auth';
+import { normalizePath, requestUrl } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { buildMarkdownDocument } from '../sync/markdown';
-import { t } from '../i18n';
+import { applyChecklistOrder } from '../utils/checklist-order';
 
 const GRAPH_ENDPOINT = 'https://graph.microsoft.com/v1.0';
 
@@ -67,43 +66,24 @@ interface GraphCollection<T> {
 
 export class MsTodoApi {
     plugin: MsTodoPlugin;
-    auth: AuthManager;
-    private refreshPromise: Promise<string> | null = null;
+    private readonly session: number;
 
     constructor(plugin: MsTodoPlugin) {
         this.plugin = plugin;
-        this.auth = new AuthManager();
+        this.session = plugin.session.version;
     }
 
-    async getValidToken(): Promise<string> {
-        const now = Date.now();
-        if (this.plugin.settings.tokenExpiresAt - now < 5 * 60 * 1000) {
-            if (this.plugin.settings.refreshToken) {
-                if (!this.refreshPromise) {
-                    this.refreshPromise = this.refreshTokenOnce()
-                        .finally(() => { this.refreshPromise = null; });
-                }
-                return this.refreshPromise;
-            }
-            throw new Error(t('apiError.noSignInInfo'));
-        }
-        return this.plugin.settings.accessToken;
+    isCurrentSession(): boolean {
+        return this.plugin.session.isCurrent(this.session);
     }
 
-    private async refreshTokenOnce(): Promise<string> {
-        try {
-            console.warn(t('apiError.tokenRefreshing'));
-            const newTokens = await this.auth.refreshAccessToken(this.plugin.settings.refreshToken);
-            await this.plugin.saveTokens(newTokens);
-            return newTokens.access_token;
-        } catch (error) {
-            new Notice(t('apiError.signInExpired'));
-            throw error;
-        }
+    assertCurrentSession() {
+        this.plugin.session.assertCurrent(this.session);
     }
 
     async request<T>(url: string, method: string = 'GET', body?: Record<string, unknown>): Promise<T> {
-        const token = await this.getValidToken();
+        const token = await this.plugin.session.getValidToken(this.session);
+        this.assertCurrentSession();
         const response = await requestUrl({
             url,
             method,
@@ -114,6 +94,7 @@ export class MsTodoApi {
             body: body ? JSON.stringify(body) : undefined,
         });
 
+        this.assertCurrentSession();
         if (method === 'DELETE' || response.status === 204) {
             return undefined as unknown as T;
         }
@@ -142,7 +123,9 @@ export class MsTodoApi {
     async getTasks(listId: string, includeCompleted: boolean = false): Promise<TodoTask[]> {
         const filter = includeCompleted ? '' : '&$filter=status ne \'completed\'';
         const url = `${GRAPH_ENDPOINT}/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems,linkedResources${filter}`;
-        return this.getCollection<TodoTask>(url);
+        const tasks = await this.getCollection<TodoTask>(url);
+        tasks.forEach(task => applyChecklistOrder(task, listId, this.plugin.checklistOrders));
+        return tasks;
     }
 
     async createTaskList(displayName: string): Promise<TodoList> {
@@ -228,6 +211,7 @@ export class MsTodoApi {
         const markdown = buildMarkdownDocument(listsWithTasks);
         const targetPath = normalizePath(this.plugin.settings.markdownSyncPath || 'Microsoft To Do.md');
         await this.ensureSyncFolderExists(targetPath);
+        this.assertCurrentSession();
         await this.plugin.app.vault.adapter.write(targetPath, markdown);
         const taskCount = listsWithTasks.reduce((sum, item) => sum + item.tasks.length, 0);
         return { path: targetPath, listCount: lists.length, taskCount };

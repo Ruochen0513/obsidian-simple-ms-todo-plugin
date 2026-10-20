@@ -1,8 +1,9 @@
 import { App, Modal, Notice } from 'obsidian';
 import type MsTodoPlugin from '../main';
 import { MsTodoApi, TodoList, TodoTask } from '../api/ms-todo-api';
-import { toLocalDateKey } from './todo-view';
+import { formatShortDate } from '../utils/task-dates';
 import { t } from '../i18n';
+import { attachDatePicker } from './date-picker';
 
 export class QuickCaptureModal extends Modal {
     private plugin: MsTodoPlugin;
@@ -12,9 +13,10 @@ export class QuickCaptureModal extends Modal {
 
     private titleInput!: HTMLInputElement;
     private listSelect!: HTMLSelectElement;
-    private todayToggle!: HTMLInputElement;
+    private dueDateInput!: HTMLInputElement;
     private confirmButton!: HTMLButtonElement;
     private submitting = false;
+    private disposeDatePicker?: () => void;
 
     constructor(app: App, plugin: MsTodoPlugin, api: MsTodoApi, lists: TodoList[], preferredListId?: string) {
         super(app);
@@ -32,8 +34,9 @@ export class QuickCaptureModal extends Modal {
             cls: 'todo-create-list-input',
             attr: { type: 'text', placeholder: t('modal.quickCapturePlaceholder'), maxlength: '255' },
         });
+        this.titleInput.setAttr('aria-label', t('modal.quickCapturePlaceholder'));
         this.titleInput.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.isComposing) {
                 event.preventDefault();
                 void this.submit();
             }
@@ -41,9 +44,10 @@ export class QuickCaptureModal extends Modal {
 
         const row = this.contentEl.createDiv({ cls: 'todo-quick-capture-row' });
 
-        const listField = row.createDiv({ cls: 'todo-quick-capture-field' });
-        listField.createDiv({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureTargetList') });
+        const listField = row.createEl('label', { cls: 'todo-quick-capture-field' });
+        listField.createSpan({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureTargetList') });
         this.listSelect = listField.createEl('select', { cls: 'dropdown todo-quick-capture-select' });
+        this.listSelect.setAttr('aria-label', t('modal.quickCaptureTargetList'));
         this.lists.forEach((list) => {
             const option = this.listSelect.createEl('option');
             option.value = list.id;
@@ -53,10 +57,12 @@ export class QuickCaptureModal extends Modal {
             this.listSelect.value = this.preferredListId;
         }
 
-        const todayField = row.createDiv({ cls: 'todo-quick-capture-field' });
-        const todayLabel = todayField.createEl('label', { cls: 'todo-quick-capture-today' });
-        this.todayToggle = todayLabel.createEl('input', { type: 'checkbox' });
-        todayLabel.createSpan({ text: t('modal.quickCaptureDueToday') });
+        const dateField = row.createEl('label', { cls: 'todo-quick-capture-field' });
+        dateField.createSpan({ cls: 'todo-quick-capture-label', text: t('modal.quickCaptureDueDate') });
+        this.dueDateInput = dateField.createEl('input', { type: 'date', cls: 'todo-quick-capture-date' });
+        this.dueDateInput.setAttr('aria-label', t('modal.quickCaptureDueDate'));
+        this.disposeDatePicker = attachDatePicker(this.app, this.plugin, this.dueDateInput, this.scope);
+        this.contentEl.createDiv({ cls: 'todo-quick-capture-hint', text: t('modal.quickCaptureDateHint') });
 
         const actions = this.contentEl.createDiv({ cls: 'todo-delete-confirm-actions' });
         const cancel = actions.createEl('button', { text: t('common.cancel') });
@@ -70,8 +76,17 @@ export class QuickCaptureModal extends Modal {
         window.setTimeout(() => this.titleInput.focus(), 0);
     }
 
+    onClose() {
+        this.disposeDatePicker?.();
+        this.disposeDatePicker = undefined;
+    }
+
     private async submit() {
         if (this.submitting) return;
+        if (!this.api.isCurrentSession()) {
+            this.close();
+            return;
+        }
         const title = this.titleInput.value.trim();
         if (!title) {
             this.titleInput.focus();
@@ -84,17 +99,29 @@ export class QuickCaptureModal extends Modal {
         this.confirmButton.disabled = true;
         this.confirmButton.setText(t('modal.quickCaptureAdding'));
 
+        let task: TodoTask | null = null;
+        const dueDate = this.dueDateInput.value;
         try {
-            let task: TodoTask = await this.api.createTask(list.id, title);
-            const dueToday = this.todayToggle.checked;
-            if (dueToday) {
-                task = await this.api.updateTaskDueDate(list.id, task.id, toLocalDateKey(new Date()));
+            task = await this.api.createTask(list.id, title);
+            if (dueDate) {
+                task = await this.api.updateTaskDueDate(list.id, task.id, dueDate);
             }
 
-            this.plugin.getTodoView()?.handleExternalTaskCreated(task, list, dueToday);
-            new Notice(t('notices.taskAddedTo', { listName: list.displayName }) + (dueToday ? t('notices.taskAddedDueTodaySuffix') : ''));
+            this.plugin.getTodoView()?.handleExternalTaskCreated(task, list);
+            new Notice(t(dueDate ? 'notices.taskAddedWithDate' : 'notices.taskAddedTo', { listName: list.displayName, date: formatShortDate(dueDate) }));
             this.close();
         } catch (error) {
+            if (!this.api.isCurrentSession()) {
+                this.close();
+                return;
+            }
+            if (task) {
+                this.plugin.getTodoView()?.handleExternalTaskCreated(task, list);
+                new Notice(t('notices.taskCreatedDateFailed', { listName: list.displayName }));
+                console.error(error);
+                this.close();
+                return;
+            }
             this.submitting = false;
             this.confirmButton.disabled = false;
             this.confirmButton.setText(t('common.add'));
