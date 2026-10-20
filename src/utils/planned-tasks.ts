@@ -1,19 +1,14 @@
 import type { TodoTask } from '../api/ms-todo-api';
 import { dateToInputValue, toLocalDateKey } from './task-dates';
+import { parseReminderDate } from './reminder-date';
 
 export function getPlannedDate(task: TodoTask): string {
     const due = dateToInputValue(task.dueDateTime?.dateTime || '');
     if (due) return due;
     const reminder = task.isReminderOn ? task.reminderDateTime : undefined;
     if (!reminder?.dateTime) return '';
-    // Due dates are calendar dates; UTC reminders represent an instant on this device.
-    if (reminder.timeZone === 'UTC' || /(?:Z|[+-]\d{2}:\d{2})$/i.test(reminder.dateTime)) {
-        const value = /(?:Z|[+-]\d{2}:\d{2})$/i.test(reminder.dateTime)
-            ? reminder.dateTime : `${reminder.dateTime}Z`;
-        const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? '' : toLocalDateKey(date);
-    }
-    return dateToInputValue(reminder.dateTime);
+    const date = parseReminderDate(reminder);
+    return date ? toLocalDateKey(date) : '';
 }
 
 export function isPlannedTask(task: TodoTask): boolean {

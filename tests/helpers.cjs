@@ -24,7 +24,8 @@ const source = buildSync({
         resolveDir: path.resolve(__dirname, '..'),
         loader: 'ts',
     },
-    bundle: true, platform: 'node', format: 'cjs', external: ['obsidian', 'flatpickr', 'flatpickr/dist/l10n/zh'], write: false,
+    bundle: true, platform: 'node', mainFields: ['module', 'main'], format: 'cjs',
+    external: ['obsidian', 'flatpickr', 'flatpickr/dist/l10n/zh'], write: false,
 }).outputFiles[0].text;
 
 class Element {

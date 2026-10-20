@@ -34,6 +34,7 @@ export class TodoView extends ItemView {
     taskListByTaskId = new Map<string, TodoList>();
     taskCache = new Map<string, TaskCacheEntry>();
     pendingTaskIds = new Set<string>();
+    private deletedTaskIds = new Set<string>();
     pendingChecklistItemIds = new Set<string>();
     recentlyMutatedTaskIds = new Set<string>();
     mainListArea: HTMLElement | null = null;
@@ -105,6 +106,7 @@ export class TodoView extends ItemView {
             this.stepScrollPositions.clear();
             this.pendingChecklistOrderTaskIds.clear();
             this.pendingTaskIds.clear();
+            this.deletedTaskIds.clear();
             this.pendingChecklistItemIds.clear();
             this.recentlyMutatedTaskIds.clear();
             this.selectedListId = this.plugin.settings.defaultViewId;
@@ -685,7 +687,7 @@ export class TodoView extends ItemView {
     setTaskCache(listId: string, tasks: TodoTask[], allLoaded: boolean) {
         const existing = this.taskCache.get(listId);
         this.taskCache.set(listId, {
-            tasks,
+            tasks: tasks.filter(task => !this.deletedTaskIds.has(task.id)),
             allLoaded,
             updatedAt: Date.now(),
             loadingAll: existing?.loadingAll,
@@ -694,6 +696,7 @@ export class TodoView extends ItemView {
     }
 
     upsertTaskInCache(listId: string, task: TodoTask) {
+        if (this.deletedTaskIds.has(task.id)) return;
         const entry = this.taskCache.get(listId);
         if (!entry) {
             this.setTaskCache(listId, [task], false);
@@ -819,7 +822,8 @@ export class TodoView extends ItemView {
         const protectedIds = new Set(protectedLocal.map((task) => task.id));
         return [
             ...protectedLocal,
-            ...serverTasks.filter((task) => !protectedIds.has(task.id) && !this.pendingTaskIds.has(task.id)),
+            ...serverTasks.filter((task) => !protectedIds.has(task.id)
+                && !this.pendingTaskIds.has(task.id) && !this.deletedTaskIds.has(task.id)),
         ];
     }
 
@@ -1223,6 +1227,8 @@ export class TodoView extends ItemView {
         const cacheEntry = this.taskCache.get(list.id);
         const previousCacheTasks = cacheEntry ? [...cacheEntry.tasks] : null;
 
+        // Keep this marker after success so earlier edits and refreshes cannot restore the task.
+        this.deletedTaskIds.add(task.id);
         this.pendingTaskIds.add(task.id);
         this.currentTasks = this.currentTasks.filter((item) => item.id !== task.id);
         this.removeTaskFromCache(list.id, task.id);
@@ -1234,6 +1240,7 @@ export class TodoView extends ItemView {
 
         try {
             await api.deleteTask(list.id, task.id);
+            if (!api.isCurrentSession()) return;
             this.noteDrafts.delete(task.id);
             this.pendingTaskIds.delete(task.id);
             this.removeTaskFromCache(list.id, task.id);
@@ -1241,6 +1248,7 @@ export class TodoView extends ItemView {
             new Notice(t('notices.taskDeleted'));
         } catch (error) {
             if (!api.isCurrentSession()) return;
+            this.deletedTaskIds.delete(task.id);
             this.pendingTaskIds.delete(task.id);
             this.currentTasks = previousCurrentTasks;
             this.selectedTaskId = previousSelectedTaskId;
@@ -1266,23 +1274,24 @@ export class TodoView extends ItemView {
         update: () => Promise<TodoTask>,
         successMessage: string,
     ) {
-        if (!api.isCurrentSession()) return;
+        if (!api.isCurrentSession() || this.deletedTaskIds.has(task.id)) return;
         try {
             const updatedTask = await update();
-            if (!api.isCurrentSession()) return;
+            if (!api.isCurrentSession() || this.deletedTaskIds.has(task.id)) return;
             this.markTaskRecentlyMutated(updatedTask.id || task.id);
             this.replaceTask(updatedTask, list.id);
             this.selectedTaskId = this.currentTasks.some(item => item.id === updatedTask.id) ? updatedTask.id : null;
             new Notice(successMessage);
             this.renderTaskList(api, list, listArea, detail);
         } catch (error) {
-            if (!api.isCurrentSession()) return;
+            if (!api.isCurrentSession() || this.deletedTaskIds.has(task.id)) return;
             new Notice(t('notices.updateTaskFailed'));
             console.error(error);
         }
     }
 
     replaceTask(updatedTask: TodoTask, listId?: string) {
+        if (this.deletedTaskIds.has(updatedTask.id)) return;
         if (listId) this.upsertTaskInCache(listId, updatedTask);
         const belongs = this.isSearchMode()
             ? updatedTask.title.toLowerCase().includes(this.searchQuery.trim().toLowerCase())
