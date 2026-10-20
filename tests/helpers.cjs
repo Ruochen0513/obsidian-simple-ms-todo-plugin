@@ -85,6 +85,7 @@ class Element {
     hasClass(name) { return this.classes.has(name); }
     toggleClass(name, enabled) { enabled ? this.addClass(name) : this.removeClass(name); }
     setText(value) { this.text = value; }
+    setCssStyles(styles) { Object.assign(this.style, styles); }
     addEventListener(name, callback) { this.listeners[name] = callback; }
     emit(name, event = {}) { return this.listeners[name]?.(event); }
     focus() {}

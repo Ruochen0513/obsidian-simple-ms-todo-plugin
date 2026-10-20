@@ -70,7 +70,7 @@ export function attachStepReorder(
         if (frame !== null) win.cancelAnimationFrame(frame);
         frame = null;
         lastFrame = 0;
-        current.row.style.transform = '';
+        current.row.setCssStyles({ transform: '' });
         current.row.removeClass('is-dragging');
         container.removeClass('is-reordering');
         if (cancel) {
